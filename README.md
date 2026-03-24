@@ -65,7 +65,7 @@ All imports use source-specific prefixes (`import-cf-`, `import-ga-`, `import-ph
 | Styling | [Tailwind CSS v4](https://tailwindcss.com) |
 | Charts | [Recharts](https://recharts.org) |
 | Maps | [MapLibre GL](https://maplibre.org) + [MapCN](https://www.mapcn.dev) tiles + [MaxMind GeoIP2](https://www.maxmind.com) |
-| AI | [OpenAI API](https://platform.openai.com) (gpt-4o) |
+| AI | [OpenAI](https://platform.openai.com) (GPT-5.4), [Anthropic](https://anthropic.com) (Claude Sonnet/Opus 4.6), [Google](https://ai.google.dev) (Gemini 3.1 Flash Lite) |
 | Forms | [React Hook Form](https://react-hook-form.com) + [Zod](https://zod.dev) validation |
 | State | [Zustand](https://zustand-demo.pmnd.rs) + [SWR](https://swr.vercel.app) |
 | Deployment | [Coolify](https://coolify.io) (self-hosted) |
