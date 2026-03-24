@@ -346,3 +346,7 @@ The background workflow handles everything without manual intervention:
 ## Deployment
 
 The project is configured for self-hosted deployment via [Coolify](https://coolify.io). Set all environment variables in the Coolify dashboard and point to your PostgreSQL and Redis instances.
+
+---
+
+Made by [9th Avenue](https://the9thave.com)
