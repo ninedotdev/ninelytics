@@ -1,13 +1,21 @@
 "use client";
 
+import { useState } from "react";
 import { AppLayout } from "@/components/layout/app-layout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Cloudflare } from "@/components/icons/cloudflare";
 import { Google } from "@/components/icons/google";
 import { Stripe } from "@/components/icons/stripe";
 import { PostHog } from "@/components/icons/posthog";
-import { IconSitemap } from "@tabler/icons-react";
+import { Telegram } from "@/components/icons/telegram";
+import { IconSitemap, IconHeartRateMonitor } from "@tabler/icons-react";
 
 function Step({ n, children }: { n: number; children: React.ReactNode }) {
   return (
@@ -28,38 +36,44 @@ function CodeBlock({ children }: { children: string }) {
   );
 }
 
+const DOC_SECTIONS = [
+  { value: "cloudflare", label: "Cloudflare", icon: <Cloudflare className="h-4 w-4" /> },
+  { value: "google", label: "Google (GA4 + Search Console)", icon: <Google className="h-4 w-4" /> },
+  { value: "sitemap", label: "Sitemap & Indexing", icon: <IconSitemap className="h-4 w-4" /> },
+  { value: "stripe", label: "Stripe", icon: <Stripe className="h-4 w-4" /> },
+  { value: "posthog", label: "PostHog", icon: <PostHog className="h-4 w-4" /> },
+  { value: "telegram", label: "Telegram Alerts", icon: <Telegram className="h-4 w-4" /> },
+  { value: "uptime", label: "Uptime Monitoring", icon: <IconHeartRateMonitor className="h-4 w-4" /> },
+  { value: "tracking", label: "Tracking Script" },
+] as const;
+
 export default function DocsPage() {
+  const [activeSection, setActiveSection] = useState<string>("cloudflare");
+
   return (
     <AppLayout>
-      <Tabs defaultValue="cloudflare" className="space-y-4">
-        <div className="flex justify-center">
-          <TabsList>
-            <TabsTrigger value="cloudflare" className="gap-2">
-              <Cloudflare className="h-4 w-4" />
-              Cloudflare
-            </TabsTrigger>
-            <TabsTrigger value="google" className="gap-2">
-              <Google className="h-4 w-4" />
-              Google
-            </TabsTrigger>
-            <TabsTrigger value="sitemap" className="gap-2">
-              <IconSitemap className="h-4 w-4" />
-              Sitemap & Indexing
-            </TabsTrigger>
-            <TabsTrigger value="stripe" className="gap-2">
-              <Stripe className="h-4 w-4" />
-              Stripe
-            </TabsTrigger>
-            <TabsTrigger value="posthog" className="gap-2">
-              <PostHog className="h-4 w-4" />
-              PostHog
-            </TabsTrigger>
-            <TabsTrigger value="tracking">Tracking Script</TabsTrigger>
-          </TabsList>
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <h1 className="text-lg font-semibold">Documentation</h1>
+          <Select value={activeSection} onValueChange={setActiveSection}>
+            <SelectTrigger className="w-[260px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {DOC_SECTIONS.map((s) => (
+                <SelectItem key={s.value} value={s.value}>
+                  <span className="flex items-center gap-2">
+                    {"icon" in s && s.icon}
+                    {s.label}
+                  </span>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
 
         {/* ─── Cloudflare ─── */}
-        <TabsContent value="cloudflare" className="space-y-4">
+        {activeSection === "cloudflare" && <div className="space-y-4">
           <Card>
             <CardHeader>
               <CardTitle className="text-sm font-medium">
@@ -163,10 +177,10 @@ export default function DocsPage() {
               </ul>
             </CardContent>
           </Card>
-        </TabsContent>
+        </div>}
 
-        {/* ─── Google (unified: Analytics + Search Console + Indexing) ─── */}
-        <TabsContent value="google" className="space-y-4">
+        {/* ─── Google ─── */}
+        {activeSection === "google" && <div className="space-y-4">
           <Card>
             <CardHeader>
               <CardTitle className="text-sm font-medium">Connect with Google OAuth</CardTitle>
@@ -318,10 +332,10 @@ GOOGLE_API_CLIENT_SECRET="your-oauth-client-secret"`}</CodeBlock>
               </p>
             </CardContent>
           </Card>
-        </TabsContent>
+        </div>}
 
         {/* ─── Sitemap & Indexing ─── */}
-        <TabsContent value="sitemap" className="space-y-4">
+        {activeSection === "sitemap" && <div className="space-y-4">
           <Card>
             <CardHeader>
               <CardTitle className="text-sm font-medium">Sitemap Auto-Indexing</CardTitle>
@@ -432,10 +446,10 @@ your-indexnow-key`}</CodeBlock>
               </p>
             </CardContent>
           </Card>
-        </TabsContent>
+        </div>}
 
         {/* ─── Stripe ─── */}
-        <TabsContent value="stripe" className="space-y-4">
+        {activeSection === "stripe" && <div className="space-y-4">
           <Card>
             <CardHeader>
               <CardTitle className="text-sm font-medium">
@@ -512,10 +526,10 @@ your-indexnow-key`}</CodeBlock>
               </p>
             </CardContent>
           </Card>
-        </TabsContent>
+        </div>}
 
         {/* ─── PostHog ─── */}
-        <TabsContent value="posthog" className="space-y-4">
+        {activeSection === "posthog" && <div className="space-y-4">
           <Card>
             <CardHeader>
               <CardTitle className="text-sm font-medium">
@@ -582,10 +596,10 @@ your-indexnow-key`}</CodeBlock>
               </p>
             </CardContent>
           </Card>
-        </TabsContent>
+        </div>}
 
         {/* ─── Tracking Script ─── */}
-        <TabsContent value="tracking" className="space-y-4">
+        {activeSection === "tracking" && <div className="space-y-4">
           <Card>
             <CardHeader>
               <CardTitle className="text-sm font-medium">
@@ -680,8 +694,105 @@ your-indexnow-key`}</CodeBlock>
               </ul>
             </CardContent>
           </Card>
-        </TabsContent>
-      </Tabs>
+        </div>}
+
+        {/* ─── Telegram ─── */}
+        {activeSection === "telegram" && <div className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm font-medium">Telegram Alerts</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                Receive uptime alerts (down, recovered, degraded, SSL expiry) directly in Telegram via your own bot.
+              </p>
+              <div className="space-y-4">
+                <Step n={1}>
+                  <p className="font-medium">Create a Telegram Bot</p>
+                  <p className="text-muted-foreground mt-1">
+                    Open Telegram and message{" "}
+                    <a href="https://t.me/BotFather" target="_blank" rel="noopener noreferrer" className="underline">@BotFather</a>.
+                    Send <code className="bg-muted px-1 rounded text-xs">/newbot</code>, choose a name, and copy the <strong>bot token</strong>.
+                  </p>
+                </Step>
+                <Step n={2}>
+                  <p className="font-medium">Get your Chat ID</p>
+                  <p className="text-muted-foreground mt-1">
+                    Start a conversation with your new bot (send any message), then message{" "}
+                    <a href="https://t.me/userinfobot" target="_blank" rel="noopener noreferrer" className="underline">@userinfobot</a>{" "}
+                    to get your numeric <strong>Chat ID</strong>. For group chats, add the bot to the group and use the group Chat ID (starts with <code className="bg-muted px-1 rounded text-xs">-</code>).
+                  </p>
+                </Step>
+                <Step n={3}>
+                  <p className="font-medium">Connect in Settings</p>
+                  <p className="text-muted-foreground mt-1">
+                    Go to <strong>Settings → Integrations → Telegram</strong>, paste both the bot token and chat ID, and click <strong>Connect & Test</strong>.
+                    A test message will be sent to confirm the connection.
+                  </p>
+                </Step>
+                <Step n={4}>
+                  <p className="font-medium">Enable per-website</p>
+                  <p className="text-muted-foreground mt-1">
+                    In each website&apos;s <strong>Settings → Uptime → Notification Preferences</strong>, toggle <strong>Telegram</strong> on.
+                    You can choose which events trigger Telegram alerts (down, recovered, degraded, SSL, content change).
+                  </p>
+                </Step>
+              </div>
+            </CardContent>
+          </Card>
+        </div>}
+
+        {/* ─── Uptime Monitoring ─── */}
+        {activeSection === "uptime" && <div className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm font-medium">Uptime Monitoring</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                Automatic health checks for all your websites with incident tracking, estimated lost visitors, and multi-channel notifications.
+              </p>
+              <div className="space-y-4">
+                <Step n={1}>
+                  <p className="font-medium">Enable per website</p>
+                  <p className="text-muted-foreground mt-1">
+                    Go to <strong>Website Settings → Uptime</strong> tab and toggle <strong>Enable uptime monitoring</strong>.
+                    Choose the check interval (1–30 minutes).
+                  </p>
+                </Step>
+                <Step n={2}>
+                  <p className="font-medium">Health checks</p>
+                  <p className="text-muted-foreground mt-1">
+                    Each check performs: HTTP status verification, response time measurement, optional keyword presence check, content hash comparison, and SSL certificate expiry detection.
+                    Degraded is triggered when response time exceeds 2× the rolling baseline.
+                  </p>
+                </Step>
+                <Step n={3}>
+                  <p className="font-medium">Incidents</p>
+                  <p className="text-muted-foreground mt-1">
+                    When a site goes down, an incident is opened automatically. On recovery, the incident is closed with duration and an estimated count of lost visitors (based on your average traffic). View incidents on the website detail page.
+                  </p>
+                </Step>
+                <Step n={4}>
+                  <p className="font-medium">Notifications</p>
+                  <p className="text-muted-foreground mt-1">
+                    Configure notification preferences per website in the <strong>Uptime → Notification Preferences</strong> card.
+                    Channels: in-app (bell icon), email (via Resend), SMS (via Twilio), and Telegram.
+                    All external channels are optional — if not configured, only in-app notifications are sent.
+                  </p>
+                </Step>
+                <Step n={5}>
+                  <p className="font-medium">Optional keyword check</p>
+                  <p className="text-muted-foreground mt-1">
+                    Set a keyword (e.g. your site name or &quot;Dashboard&quot;) that must appear in the page HTML.
+                    If the keyword disappears (e.g. error page is served), an alert is triggered even if HTTP status is 200.
+                  </p>
+                </Step>
+              </div>
+            </CardContent>
+          </Card>
+        </div>}
+      </div>
     </AppLayout>
   );
 }

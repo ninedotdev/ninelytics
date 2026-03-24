@@ -2,7 +2,8 @@
 
 import { useState, useEffect } from 'react'
 import { useSession } from 'next-auth/react'
-import { IconTrash, IconCopy, IconUnlink, IconEye, IconEyeOff, IconBrandGoogle } from '@tabler/icons-react'
+import { IconTrash, IconCopy, IconUnlink, IconEye, IconEyeOff, IconBrandGoogle, IconCircleCheck } from '@tabler/icons-react'
+import { Telegram } from '@/components/icons/telegram'
 import { Cloudflare } from '@/components/icons/cloudflare'
 import { GoogleAnalytics } from '@/components/icons/google-analytics'
 import { Spinner } from '@/components/ui/spinner'
@@ -190,6 +191,28 @@ export default function SettingsPage() {
 
   const [cfToken, setCfToken] = useState('')
   const [cfSaving, setCfSaving] = useState(false)
+
+  // Telegram
+  const [tgBotToken, setTgBotToken] = useState('')
+  const [tgChatId, setTgChatId] = useState('')
+  const { data: tgPrefs, refetch: refetchTgPrefs } = api.uptime.getNotificationPrefs.useQuery()
+  const pairTelegram = api.uptime.pairTelegram.useMutation({
+    onSuccess(data) {
+      sileo.success({ title: `Telegram connected via @${data.botUsername ?? 'bot'}` })
+      setTgBotToken('')
+      setTgChatId('')
+      refetchTgPrefs()
+    },
+    onError(error) {
+      sileo.error({ title: error.message || 'Failed to connect Telegram' })
+    },
+  })
+  const unpairTelegram = api.uptime.unpairTelegram.useMutation({
+    onSuccess() {
+      sileo.success({ title: 'Telegram disconnected' })
+      refetchTgPrefs()
+    },
+  })
 
   const { data: cfZones, refetch: refetchCfZones } = api.cloudflare.listZones.useQuery()
 
@@ -600,6 +623,87 @@ export default function SettingsPage() {
                   <p className="text-xs text-muted-foreground">
                     Requires <code className="text-xs">GOOGLE_API_CLIENT_ID</code> and <code className="text-xs">GOOGLE_API_CLIENT_SECRET</code> in your environment.
                   </p>
+                </>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Telegram Integration */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm font-medium flex items-center gap-2">
+                <Telegram className="h-4 w-4" />
+                Telegram
+              </CardTitle>
+              <CardDescription>
+                Receive uptime alerts via Telegram bot
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {tgPrefs?.telegramChatId ? (
+                <>
+                  <div className="flex items-center gap-2 p-3 bg-green-50 dark:bg-green-900/20 rounded-lg">
+                    <div className="h-2 w-2 rounded-full bg-green-500" />
+                    <span className="text-sm font-medium text-green-800 dark:text-green-200">Connected</span>
+                    <span className="text-xs text-green-600 dark:text-green-400 ml-auto font-mono">
+                      {tgPrefs.telegramChatId}
+                    </span>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Uptime alerts will be sent to this Telegram chat.
+                  </p>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="text-red-600 hover:text-red-700 w-full"
+                    onClick={() => unpairTelegram.mutate()}
+                    disabled={unpairTelegram.isPending}
+                  >
+                    Disconnect
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <div className="space-y-3">
+                    <p className="text-xs text-muted-foreground">
+                      Create a bot via{' '}
+                      <a href="https://t.me/BotFather" target="_blank" rel="noopener noreferrer" className="underline">@BotFather</a>,
+                      then get your Chat ID from{' '}
+                      <a href="https://t.me/userinfobot" target="_blank" rel="noopener noreferrer" className="underline">@userinfobot</a>.
+                    </p>
+                    <div className="space-y-2">
+                      <Label htmlFor="tgBotToken" className="text-xs">Bot Token</Label>
+                      <Input
+                        id="tgBotToken"
+                        type="password"
+                        value={tgBotToken}
+                        onChange={(e) => setTgBotToken(e.target.value)}
+                        placeholder="123456:ABC-DEF..."
+                        className="font-mono text-xs"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="tgChatId" className="text-xs">Chat ID</Label>
+                      <Input
+                        id="tgChatId"
+                        value={tgChatId}
+                        onChange={(e) => setTgChatId(e.target.value)}
+                        placeholder="123456789"
+                        className="font-mono text-xs"
+                      />
+                    </div>
+                  </div>
+                  <Button
+                    className="w-full"
+                    onClick={() => pairTelegram.mutate({ botToken: tgBotToken, chatId: tgChatId })}
+                    disabled={!tgBotToken.trim() || !tgChatId.trim() || pairTelegram.isPending}
+                  >
+                    {pairTelegram.isPending ? (
+                      <><Spinner className="h-4 w-4 mr-2" /> Verifying...</>
+                    ) : (
+                      <><Telegram className="h-4 w-4 mr-2" /> Connect & Test</>
+                    )}
+                  </Button>
                 </>
               )}
             </CardContent>

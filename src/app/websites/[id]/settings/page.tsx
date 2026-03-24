@@ -2,12 +2,13 @@
 
 import { useState, useEffect } from "react";
 import { useRouter, useParams, useSearchParams } from "next/navigation";
-import { IconArrowLeft, IconGlobe, IconCopy, IconAlertTriangle, IconDeviceFloppy, IconUnlink, IconRefresh, IconExternalLink, IconSettings, IconPlug, IconShieldCheck, IconSitemap, IconCircleCheck, IconCircleX, IconGauge } from "@tabler/icons-react";
+import { IconArrowLeft, IconGlobe, IconCopy, IconAlertTriangle, IconDeviceFloppy, IconUnlink, IconRefresh, IconExternalLink, IconSettings, IconPlug, IconShieldCheck, IconSitemap, IconCircleCheck, IconCircleX, IconGauge, IconHeartRateMonitor } from "@tabler/icons-react";
 import { Tabs, TabsList, TabsTab, TabsPanel } from "@/components/ui/tabs";
 import { Cloudflare } from "@/components/icons/cloudflare";
 import { GoogleAnalytics } from "@/components/icons/google-analytics";
 import { Google } from "@/components/icons/google";
 import { Stripe } from "@/components/icons/stripe";
+import { Telegram } from "@/components/icons/telegram";
 import { PostHog } from "@/components/icons/posthog";
 import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
@@ -87,13 +88,172 @@ type Website = {
   } | null;
 };
 
+function NotificationPrefsCard() {
+  const [prefsSaving, setPrefsSaving] = useState(false);
+
+  const { data: prefs, refetch: refetchPrefs } = api.uptime.getNotificationPrefs.useQuery();
+
+  const [notifyOnDown, setNotifyOnDown] = useState(true);
+  const [notifyOnRecovered, setNotifyOnRecovered] = useState(true);
+  const [notifyOnDegraded, setNotifyOnDegraded] = useState(false);
+  const [notifyOnSslExpiry, setNotifyOnSslExpiry] = useState(true);
+  const [notifyOnContentChange, setNotifyOnContentChange] = useState(false);
+  const [notifyViaApp, setNotifyViaApp] = useState(true);
+  const [notifyViaEmail, setNotifyViaEmail] = useState(true);
+  const [notifyViaSms, setNotifyViaSms] = useState(false);
+  const [notifyViaTelegram, setNotifyViaTelegram] = useState(false);
+  const [phoneNumber, setPhoneNumber] = useState("");
+
+  useEffect(() => {
+    if (prefs) {
+      setNotifyOnDown(prefs.notifyOnDown ?? true);
+      setNotifyOnRecovered(prefs.notifyOnRecovered ?? true);
+      setNotifyOnDegraded(prefs.notifyOnDegraded ?? false);
+      setNotifyOnSslExpiry(prefs.notifyOnSslExpiry ?? true);
+      setNotifyOnContentChange(prefs.notifyOnContentChange ?? false);
+      setNotifyViaApp(prefs.notifyViaApp ?? true);
+      setNotifyViaEmail(prefs.notifyViaEmail ?? true);
+      setNotifyViaSms(prefs.notifyViaSms ?? false);
+      setNotifyViaTelegram(prefs.notifyViaTelegram ?? false);
+      setPhoneNumber(prefs.phoneNumber ?? "");
+    }
+  }, [prefs]);
+
+  const updatePrefs = api.uptime.updateNotificationPrefs.useMutation({
+    onSuccess() {
+      sileo.success({ title: "Notification preferences saved" });
+      setPrefsSaving(false);
+      refetchPrefs();
+    },
+    onError(error) {
+      sileo.error({ title: error.message || "Failed to save" });
+      setPrefsSaving(false);
+    },
+  });
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Notification Preferences</CardTitle>
+        <CardDescription>Choose what events trigger alerts and how you receive them</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-5">
+        {/* Event types */}
+        <div>
+          <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-3">Alert Events</div>
+          <div className="space-y-2">
+            {[
+              { label: "Site goes down", desc: "HTTP errors or timeouts", value: notifyOnDown, set: setNotifyOnDown },
+              { label: "Site recovers", desc: "Back online after an incident", value: notifyOnRecovered, set: setNotifyOnRecovered },
+              { label: "Slow response", desc: "Response time exceeds threshold", value: notifyOnDegraded, set: setNotifyOnDegraded },
+              { label: "SSL expiring", desc: "Certificate expires within 14 days", value: notifyOnSslExpiry, set: setNotifyOnSslExpiry },
+              { label: "Content changed", desc: "Unexpected page content change", value: notifyOnContentChange, set: setNotifyOnContentChange },
+            ].map((item) => (
+              <div key={item.label} className="flex items-center justify-between py-1">
+                <div>
+                  <div className="text-sm font-medium">{item.label}</div>
+                  <div className="text-xs text-muted-foreground">{item.desc}</div>
+                </div>
+                <Switch checked={item.value} onCheckedChange={item.set} />
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Channels */}
+        <div>
+          <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-3">Delivery Channels</div>
+          <div className="space-y-2">
+            <div className="flex items-center justify-between py-1">
+              <div>
+                <div className="text-sm font-medium">In-app notifications</div>
+                <div className="text-xs text-muted-foreground">Bell icon in the header</div>
+              </div>
+              <Switch checked={notifyViaApp} onCheckedChange={setNotifyViaApp} />
+            </div>
+
+            <div className="flex items-center justify-between py-1">
+              <div>
+                <div className="text-sm font-medium">Email</div>
+                <div className="text-xs text-muted-foreground">Alerts to your account email</div>
+              </div>
+              <Switch checked={notifyViaEmail} onCheckedChange={setNotifyViaEmail} />
+            </div>
+
+            <div className="flex items-center justify-between py-1">
+              <div>
+                <div className="text-sm font-medium">SMS</div>
+                <div className="text-xs text-muted-foreground">Requires phone number below</div>
+              </div>
+              <Switch checked={notifyViaSms} onCheckedChange={setNotifyViaSms} />
+            </div>
+
+            {notifyViaSms && (
+              <div className="pl-4 space-y-2">
+                <Label htmlFor="phoneNumber">Phone number</Label>
+                <Input
+                  id="phoneNumber"
+                  value={phoneNumber}
+                  onChange={(e) => setPhoneNumber(e.target.value)}
+                  placeholder="+1 555 123 4567"
+                  className="text-sm max-w-xs"
+                />
+              </div>
+            )}
+
+            <div className="flex items-center justify-between py-1">
+              <div>
+                <div className="text-sm font-medium">Telegram</div>
+                <div className="text-xs text-muted-foreground">
+                  {prefs?.telegramChatId
+                    ? <span className="flex items-center gap-1"><IconCircleCheck size={11} className="text-green-500" /> Connected — configure in Settings → Integrations</span>
+                    : "Set up in Settings → Integrations"
+                  }
+                </div>
+              </div>
+              <Switch
+                checked={notifyViaTelegram}
+                onCheckedChange={setNotifyViaTelegram}
+                disabled={!prefs?.telegramChatId}
+              />
+            </div>
+          </div>
+        </div>
+
+        <div className="flex justify-end pt-2">
+          <Button
+            onClick={() => {
+              setPrefsSaving(true);
+              updatePrefs.mutate({
+                notifyOnDown,
+                notifyOnRecovered,
+                notifyOnDegraded,
+                notifyOnSslExpiry,
+                notifyOnContentChange,
+                notifyViaApp,
+                notifyViaEmail,
+                notifyViaSms,
+                notifyViaTelegram,
+                phoneNumber: phoneNumber || undefined,
+              });
+            }}
+            disabled={prefsSaving}
+          >
+            {prefsSaving ? <><Spinner size={14} className="mr-1.5" /> Saving...</> : <><IconDeviceFloppy size={14} className="mr-1.5" /> Save Preferences</>}
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function WebsiteSettingsPage() {
   const router = useRouter();
   const params = useParams();
   const searchParams = useSearchParams();
   const websiteId = params.id as string;
 
-  const VALID_TABS = ["general", "consent", "integrations", "indexing"] as const;
+  const VALID_TABS = ["general", "consent", "integrations", "indexing", "uptime"] as const;
   type Tab = typeof VALID_TABS[number];
   const activeTab = (VALID_TABS.includes(searchParams.get("tab") as Tab)
     ? searchParams.get("tab")
@@ -465,6 +625,51 @@ export default function WebsiteSettingsPage() {
     },
   });
 
+  // ─── Uptime state ───
+  const [uptimeEnabled, setUptimeEnabled] = useState(false);
+  const [uptimeKeyword, setUptimeKeyword] = useState("");
+  const [uptimeInterval, setUptimeInterval] = useState("5");
+  const [uptimeSaving, setUptimeSaving] = useState(false);
+
+  const { data: uptimeSettings, refetch: refetchUptime } = api.uptime.getSettings.useQuery(
+    { websiteId },
+    { enabled: !!websiteId }
+  );
+
+  useEffect(() => {
+    if (uptimeSettings) {
+      setUptimeEnabled(uptimeSettings.uptimeEnabled ?? false);
+      setUptimeKeyword(uptimeSettings.uptimeKeyword ?? "");
+      setUptimeInterval(String(uptimeSettings.uptimeInterval ?? 5));
+    }
+  }, [uptimeSettings]);
+
+  const updateUptimeSettings = api.uptime.updateSettings.useMutation({
+    onSuccess() {
+      sileo.success({ title: "Uptime settings saved" });
+      setUptimeSaving(false);
+      refetchUptime();
+    },
+    onError(error) {
+      sileo.error({ title: error.message || "Failed to save settings" });
+      setUptimeSaving(false);
+    },
+  });
+
+  const triggerUptimeCheck = api.uptime.triggerCheck.useMutation({
+    onSuccess() {
+      sileo.success({ title: "Check triggered" });
+      setTimeout(() => refetchUptime(), 5000);
+    },
+  });
+
+  const resetUptimeBaseline = api.uptime.resetContentBaseline.useMutation({
+    onSuccess() {
+      sileo.success({ title: "Content baseline reset" });
+      refetchUptime();
+    },
+  });
+
   useEffect(() => {
     if (data) {
       setWebsite({
@@ -634,6 +839,10 @@ export default function WebsiteSettingsPage() {
             <TabsTab value="indexing" className="gap-1.5">
               <IconSitemap size={14} />
               Indexing
+            </TabsTab>
+            <TabsTab value="uptime" className="gap-1.5">
+              <IconHeartRateMonitor size={14} />
+              Uptime
             </TabsTab>
           </TabsList>
           </div>
@@ -1819,6 +2028,176 @@ export default function WebsiteSettingsPage() {
             </Card>
 
           </TabsPanel>
+
+          {/* ─── Uptime Tab ─── */}
+          <TabsPanel value="uptime" className="space-y-6">
+
+            {/* Configuration */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Uptime Monitoring</CardTitle>
+                <CardDescription>
+                  Automatic health checks for your website with incident tracking and notifications
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex items-center justify-between py-1">
+                  <div>
+                    <div className="text-sm font-medium">Enable uptime monitoring</div>
+                    <div className="text-xs text-muted-foreground">Run periodic health checks and alert on downtime</div>
+                  </div>
+                  <Switch
+                    checked={uptimeEnabled}
+                    onCheckedChange={setUptimeEnabled}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Check interval</Label>
+                  <select
+                    value={uptimeInterval}
+                    onChange={(e) => setUptimeInterval(e.target.value)}
+                    className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                  >
+                    <option value="1">Every 1 minute</option>
+                    <option value="2">Every 2 minutes</option>
+                    <option value="5">Every 5 minutes</option>
+                    <option value="10">Every 10 minutes</option>
+                    <option value="15">Every 15 minutes</option>
+                    <option value="30">Every 30 minutes</option>
+                  </select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="uptimeKeyword">Keyword to verify (optional)</Label>
+                  <Input
+                    id="uptimeKeyword"
+                    value={uptimeKeyword}
+                    onChange={(e) => setUptimeKeyword(e.target.value)}
+                    placeholder="e.g. Welcome, Dashboard, Login"
+                    className="text-sm"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    If set, alerts when this word disappears from your page content
+                  </p>
+                </div>
+
+                {uptimeSettings?.uptimeContentHash && (
+                  <div className="flex items-center justify-between py-1">
+                    <div>
+                      <div className="text-sm font-medium">Content baseline</div>
+                      <div className="text-xs text-muted-foreground">Reset to detect content changes from the current state</div>
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => resetUptimeBaseline.mutate({ websiteId })}
+                      disabled={resetUptimeBaseline.isPending}
+                    >
+                      Reset baseline
+                    </Button>
+                  </div>
+                )}
+
+                <div className="flex justify-end pt-2">
+                  <Button
+                    onClick={() => {
+                      setUptimeSaving(true);
+                      updateUptimeSettings.mutate({
+                        websiteId,
+                        uptimeEnabled,
+                        uptimeKeyword: uptimeKeyword || undefined,
+                        uptimeInterval: parseInt(uptimeInterval),
+                      });
+                    }}
+                    disabled={uptimeSaving}
+                  >
+                    {uptimeSaving ? <><Spinner size={14} className="mr-1.5" /> Saving...</> : <><IconDeviceFloppy size={14} className="mr-1.5" /> Save Settings</>}
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Status (shown when enabled) */}
+            {uptimeSettings?.uptimeEnabled && (
+              <Card>
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <CardTitle>Uptime Status</CardTitle>
+                      <CardDescription>
+                        {uptimeSettings.lastUptimeCheck
+                          ? `Last checked ${formatDate(uptimeSettings.lastUptimeCheck)}`
+                          : "No checks yet"}
+                      </CardDescription>
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => triggerUptimeCheck.mutate({ websiteId })}
+                      disabled={triggerUptimeCheck.isPending}
+                    >
+                      {triggerUptimeCheck.isPending ? <><Spinner size={12} className="mr-1" /> Checking...</> : "Check Now"}
+                    </Button>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex items-center gap-3 mb-4">
+                    <div className={`w-3 h-3 rounded-full ${
+                      uptimeSettings.lastUptimeStatus === "up" ? "bg-green-500" :
+                      uptimeSettings.lastUptimeStatus === "down" ? "bg-red-500" :
+                      uptimeSettings.lastUptimeStatus === "degraded" ? "bg-yellow-500" :
+                      "bg-muted"
+                    }`} />
+                    <span className="text-sm font-medium capitalize">
+                      {uptimeSettings.lastUptimeStatus ?? "Pending first check"}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                    <div>
+                      <div className="text-2xl font-bold">
+                        {uptimeSettings.uptimeBaselineResponseTime
+                          ? `${uptimeSettings.uptimeBaselineResponseTime}ms`
+                          : "—"}
+                      </div>
+                      <div className="text-xs text-muted-foreground">Avg Response</div>
+                    </div>
+                    <div>
+                      <div className="text-2xl font-bold">
+                        {uptimeSettings.uptimePercent != null
+                          ? `${uptimeSettings.uptimePercent}%`
+                          : "—"}
+                      </div>
+                      <div className="text-xs text-muted-foreground">Uptime (30d)</div>
+                    </div>
+                    <div>
+                      <div className="text-2xl font-bold">{uptimeSettings.totalChecks}</div>
+                      <div className="text-xs text-muted-foreground">Total Checks</div>
+                    </div>
+                    <div>
+                      <div className={`text-2xl font-bold ${uptimeSettings.openIncidents > 0 ? "text-red-500" : ""}`}>
+                        {uptimeSettings.openIncidents}
+                      </div>
+                      <div className="text-xs text-muted-foreground">Open Incidents</div>
+                    </div>
+                  </div>
+
+                  {uptimeSettings.uptimeSslExpiry && (
+                    <div className="mt-4 pt-4 border-t">
+                      <div className="text-xs text-muted-foreground">SSL Certificate Expires</div>
+                      <div className="text-sm font-medium">{formatDate(uptimeSettings.uptimeSslExpiry)}</div>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Notification Preferences */}
+            <NotificationPrefsCard />
+
+          </TabsPanel>
+
         </Tabs>
 
       </div>

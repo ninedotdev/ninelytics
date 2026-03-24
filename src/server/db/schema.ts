@@ -41,6 +41,19 @@ export const users = pgTable("users", {
   googleRefreshToken: text("google_refresh_token"),
   googleTokenExpiresAt: timestamp("google_token_expires_at", { mode: "string" }),
   googleScopes: text("google_scopes"),
+  // Notification preferences (uptime + future channels)
+  phoneNumber: text("phone_number"),
+  telegramChatId: text("telegram_chat_id"),
+  telegramBotToken: text("telegram_bot_token"),
+  notifyOnDown: boolean("notify_on_down").default(true),
+  notifyOnRecovered: boolean("notify_on_recovered").default(true),
+  notifyOnDegraded: boolean("notify_on_degraded").default(false),
+  notifyOnSslExpiry: boolean("notify_on_ssl_expiry").default(true),
+  notifyOnContentChange: boolean("notify_on_content_change").default(false),
+  notifyViaApp: boolean("notify_via_app").default(true),
+  notifyViaEmail: boolean("notify_via_email").default(true),
+  notifyViaSms: boolean("notify_via_sms").default(false),
+  notifyViaTelegram: boolean("notify_via_telegram").default(false),
   createdAt: timestamp("created_at", { mode: "string" }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { mode: "string" }).defaultNow().notNull(),
 }, (table) => ({
@@ -278,6 +291,15 @@ export const websites = pgTable(
     lastSitemapHash: text("last_sitemap_hash"),
     // Speed Insights (Core Web Vitals RUM)
     speedInsightsEnabled: boolean("speed_insights_enabled").default(false),
+    // Uptime monitoring
+    uptimeEnabled: boolean("uptime_enabled").default(false),
+    uptimeKeyword: text("uptime_keyword"),
+    uptimeInterval: integer("uptime_interval").default(5),
+    uptimeBaselineResponseTime: integer("uptime_baseline_response_time"),
+    uptimeContentHash: text("uptime_content_hash"),
+    uptimeSslExpiry: timestamp("uptime_ssl_expiry", { mode: "string" }),
+    lastUptimeCheck: timestamp("last_uptime_check", { mode: "string" }),
+    lastUptimeStatus: text("last_uptime_status"),
     ownerId: text("owner_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
@@ -288,6 +310,45 @@ export const websites = pgTable(
   },
   (table) => ({
     trackingCodeKey: uniqueIndex("websites_tracking_code_key").on(table.trackingCode),
+  })
+)
+
+// Uptime monitoring
+export const uptimeChecks = pgTable(
+  "uptime_checks",
+  {
+    id: text("id").primaryKey().default(sql`gen_random_uuid()`),
+    websiteId: text("website_id")
+      .notNull()
+      .references(() => websites.id, { onDelete: "cascade" }),
+    status: text("status").notNull(), // 'up' | 'down' | 'degraded' | 'changed'
+    statusCode: integer("status_code"),
+    responseTime: integer("response_time"), // ms
+    errorMessage: text("error_message"),
+    contentHash: text("content_hash"),
+    checkedAt: timestamp("checked_at", { mode: "string" }).defaultNow().notNull(),
+  },
+  (table) => ({
+    websiteCheckedAtIdx: index("uptime_checks_website_checked_at_idx").on(table.websiteId, table.checkedAt),
+  })
+)
+
+export const uptimeIncidents = pgTable(
+  "uptime_incidents",
+  {
+    id: text("id").primaryKey().default(sql`gen_random_uuid()`),
+    websiteId: text("website_id")
+      .notNull()
+      .references(() => websites.id, { onDelete: "cascade" }),
+    type: text("type").notNull(), // 'down' | 'degraded' | 'ssl' | 'content_changed'
+    startedAt: timestamp("started_at", { mode: "string" }).defaultNow().notNull(),
+    resolvedAt: timestamp("resolved_at", { mode: "string" }),
+    durationSeconds: integer("duration_seconds"),
+    estimatedLostVisitors: integer("estimated_lost_visitors"),
+    notifiedAt: timestamp("notified_at", { mode: "string" }),
+  },
+  (table) => ({
+    websiteIdx: index("uptime_incidents_website_idx").on(table.websiteId),
   })
 )
 

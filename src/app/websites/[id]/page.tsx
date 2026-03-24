@@ -53,6 +53,7 @@ import { Ring } from "@/components/charts/ring";
 import { RingCenter } from "@/components/charts/ring-center";
 import { api } from "@/utils/trpc";
 import { useTimezone } from "@/hooks/use-timezone";
+import { IconHeartRateMonitor } from "@tabler/icons-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -81,6 +82,16 @@ export default function WebsiteDetailsPage() {
   const { data: stripeRevenue } = api.stripe.revenue.useQuery(
     { websiteId, days: 90 },
     { enabled: !!data },
+  );
+
+  const { data: uptimeStatus } = api.uptime.getStatus.useQuery(
+    { websiteId },
+    { enabled: !!data, refetchInterval: 60000 },
+  );
+
+  const { data: uptimeIncidents } = api.uptime.getIncidents.useQuery(
+    { websiteId, limit: 5 },
+    { enabled: !!uptimeStatus },
   );
 
   // Must be before early returns (Rules of Hooks)
@@ -262,6 +273,19 @@ export default function WebsiteDetailsPage() {
                 {website.url}
               </a>
             </span>
+            {uptimeStatus && (
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <div className={`w-2 h-2 rounded-full ${
+                  uptimeStatus.status === "up" ? "bg-green-500" :
+                  uptimeStatus.status === "down" ? "bg-red-500" :
+                  uptimeStatus.status === "degraded" ? "bg-yellow-500" :
+                  "bg-muted"
+                }`} />
+                <span className="capitalize font-medium">{uptimeStatus.status === "up" ? "Online" : uptimeStatus.status}</span>
+                {uptimeStatus.responseTime && <span>{uptimeStatus.responseTime}ms</span>}
+                {uptimeStatus.uptimePercent != null && <span>{uptimeStatus.uptimePercent}% uptime</span>}
+              </div>
+            )}
           </div>
 
           {/* Desktop actions */}
@@ -726,6 +750,54 @@ export default function WebsiteDetailsPage() {
           );
         })()}
       </div>
+      {/* Uptime Incidents */}
+      {uptimeIncidents && uptimeIncidents.length > 0 && (
+        <div className="mt-6">
+          <div className="flex items-center gap-2 mb-3">
+            <IconHeartRateMonitor size={16} className="text-muted-foreground" />
+            <h3 className="text-sm font-medium">Recent Incidents</h3>
+          </div>
+          <div className="rounded-lg border overflow-hidden">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b bg-muted/50">
+                  <th className="text-left px-3 py-2 font-medium text-muted-foreground">Date</th>
+                  <th className="text-left px-3 py-2 font-medium text-muted-foreground">Type</th>
+                  <th className="text-left px-3 py-2 font-medium text-muted-foreground">Duration</th>
+                  <th className="text-left px-3 py-2 font-medium text-muted-foreground">Est. Lost Visitors</th>
+                  <th className="text-left px-3 py-2 font-medium text-muted-foreground">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {uptimeIncidents.map((incident) => (
+                  <tr key={incident.id} className="border-b last:border-b-0">
+                    <td className="px-3 py-2 text-muted-foreground">
+                      {new Date(incident.startedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
+                    </td>
+                    <td className="px-3 py-2">
+                      <Badge variant="outline" className="text-xs capitalize">{incident.type}</Badge>
+                    </td>
+                    <td className="px-3 py-2 text-muted-foreground tabular-nums">
+                      {incident.durationSeconds != null ? formatDuration(incident.durationSeconds) : "—"}
+                    </td>
+                    <td className="px-3 py-2 text-muted-foreground tabular-nums">
+                      {incident.estimatedLostVisitors != null ? `~${incident.estimatedLostVisitors}` : "—"}
+                    </td>
+                    <td className="px-3 py-2">
+                      {incident.resolvedAt ? (
+                        <span className="text-green-600 dark:text-green-400 text-xs font-medium">Resolved</span>
+                      ) : (
+                        <span className="text-red-600 dark:text-red-400 text-xs font-medium">Ongoing</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       {/* Deletion Progress Dialog */}
       {showDeletionDialog && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
