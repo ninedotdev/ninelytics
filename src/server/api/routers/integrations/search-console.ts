@@ -1,10 +1,84 @@
 import { z } from "zod"
-import { eq, sql } from "drizzle-orm"
+import { eq, sql, desc, gte } from "drizzle-orm"
 import { users, websites, searchConsoleData } from "@/server/db/schema"
 import { protectedProcedure, router } from "../../trpc"
 import { ensureAccess } from "../helpers/ensure-access"
 
 export const searchConsoleRouter = router({
+  getSummary: protectedProcedure
+    .input(z.object({ websiteId: z.string(), days: z.number().default(30) }))
+    .query(async ({ ctx, input }) => {
+      await ensureAccess(ctx.db, input.websiteId, ctx.session!.user.id, false)
+
+      const since = new Date(Date.now() - input.days * 86400000).toISOString().slice(0, 10)
+
+      const [totals] = await ctx.db.execute<{
+        total_clicks: string; total_impressions: string; avg_ctr: string; avg_position: string
+      }>(sql`
+        SELECT
+          COALESCE(SUM(clicks), 0) as total_clicks,
+          COALESCE(SUM(impressions), 0) as total_impressions,
+          COALESCE(AVG(NULLIF(ctr, 0)), 0) as avg_ctr,
+          COALESCE(AVG(NULLIF(position, 0)), 0) as avg_position
+        FROM search_console_data
+        WHERE website_id = ${input.websiteId}
+          AND record_date >= ${since}
+      `)
+
+      const topQueries = await ctx.db.execute<{
+        query: string; clicks: string; impressions: string; ctr: string; position: string
+      }>(sql`
+        SELECT
+          query,
+          SUM(clicks) as clicks,
+          SUM(impressions) as impressions,
+          AVG(NULLIF(ctr, 0)) as ctr,
+          AVG(NULLIF(position, 0)) as position
+        FROM search_console_data
+        WHERE website_id = ${input.websiteId}
+          AND record_date >= ${since}
+        GROUP BY query
+        ORDER BY SUM(clicks) DESC
+        LIMIT 15
+      `)
+
+      const topPages = await ctx.db.execute<{
+        page: string; clicks: string; impressions: string
+      }>(sql`
+        SELECT
+          page,
+          SUM(clicks) as clicks,
+          SUM(impressions) as impressions
+        FROM search_console_data
+        WHERE website_id = ${input.websiteId}
+          AND record_date >= ${since}
+        GROUP BY page
+        ORDER BY SUM(clicks) DESC
+        LIMIT 10
+      `)
+
+      const stats = (totals as unknown as Array<Record<string, string>>)[0]
+
+      return {
+        totalClicks: Number(stats?.total_clicks ?? 0),
+        totalImpressions: Number(stats?.total_impressions ?? 0),
+        avgCtr: Number(Number(stats?.avg_ctr ?? 0).toFixed(2)),
+        avgPosition: Number(Number(stats?.avg_position ?? 0).toFixed(1)),
+        topQueries: (topQueries as unknown as Array<Record<string, string>>).map((q) => ({
+          query: q.query,
+          clicks: Number(q.clicks),
+          impressions: Number(q.impressions),
+          ctr: Number(Number(q.ctr).toFixed(2)),
+          position: Number(Number(q.position).toFixed(1)),
+        })),
+        topPages: (topPages as unknown as Array<Record<string, string>>).map((p) => ({
+          page: p.page,
+          clicks: Number(p.clicks),
+          impressions: Number(p.impressions),
+        })),
+      }
+    }),
+
   listSites: protectedProcedure
     .query(async ({ ctx }) => {
       const userId = ctx.session!.user.id

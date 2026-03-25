@@ -55,7 +55,7 @@ All imports use source-specific prefixes (`import-cf-`, `import-ga-`, `import-ph
 | Layer | Technology |
 |---|---|
 | Framework | [Next.js 16](https://nextjs.org) (App Router, Turbopack) |
-| Language | TypeScript (strict) |
+| Language | TypeScript 6 (strict) |
 | API | [tRPC v11](https://trpc.io) + [TanStack Query v5](https://tanstack.com/query) |
 | Database | PostgreSQL via [Drizzle ORM](https://orm.drizzle.team) |
 | Cache / Rate limiting | Redis via [ioredis](https://github.com/redis/ioredis) |
@@ -63,7 +63,7 @@ All imports use source-specific prefixes (`import-cf-`, `import-ga-`, `import-ph
 | UI Components | [shadcn/ui](https://ui.shadcn.com) + [Radix UI](https://www.radix-ui.com) primitives |
 | Icons | [Tabler Icons](https://tabler.io/icons) |
 | Styling | [Tailwind CSS v4](https://tailwindcss.com) |
-| Charts | [Recharts](https://recharts.org) |
+| Charts | Custom visx-based charts (Area, Bar, Ring) + [Recharts](https://recharts.org) sparklines |
 | Maps | [MapLibre GL](https://maplibre.org) + [MapCN](https://www.mapcn.dev) tiles + [MaxMind GeoIP2](https://www.maxmind.com) |
 | AI | [OpenAI](https://platform.openai.com) (GPT-5.4), [Anthropic](https://anthropic.com) (Claude Sonnet/Opus 4.6), [Google](https://ai.google.dev) (Gemini 3.1 Flash Lite) |
 | Forms | [React Hook Form](https://react-hook-form.com) + [Zod](https://zod.dev) validation |
@@ -151,31 +151,48 @@ pnpm install
 
 ### Environment Variables
 
-Create a `.env.local` file:
+Copy `.env.example` to `.env` and fill in the values:
 
 ```env
-# Database
+# ─── Required ───
 DATABASE_URL="postgresql://user:password@localhost:5432/analytics"
-
-# Redis
 REDIS_URL="redis://localhost:6379"
-
-# Auth
 NEXTAUTH_URL="http://localhost:3000"
-NEXTAUTH_SECRET="your-secret"
-
-# Google OAuth (for GA4 + Search Console integrations)
-GOOGLE_API_CLIENT_ID=""
-GOOGLE_API_CLIENT_SECRET=""
+NEXTAUTH_SECRET="generate-a-random-secret"
+JWT_SECRET="generate-a-random-secret"
 NEXT_PUBLIC_APP_URL="http://localhost:3000"
 
-# OpenAI (for AI assistant)
-OPENAI_API_KEY="sk-..."
+# ─── AI Models (at least one required for AI Insights) ───
+OPENAI_API_KEY=""           # GPT-5.4, GPT-5.3, GPT-5.4 Mini
+ANTHROPIC_API_KEY=""        # Claude Sonnet 4.6, Claude Opus 4.6
+GOOGLE_AI_API_KEY=""        # Gemini 3.1 Flash Lite
 
-# MaxMind GeoIP2 (for geo maps)
-MAXMIND_ACCOUNT_ID=""
+# ─── Google OAuth (for GA4 + Search Console + Indexing API) ───
+GOOGLE_API_CLIENT_ID=""
+GOOGLE_API_CLIENT_SECRET=""
+
+# ─── GeoIP (for visitor maps) ───
 MAXMIND_LICENSE_KEY=""
+MAXMIND_DB_PATH="/var/data/GeoLite2-City.mmdb"
 
+# ─── Uptime Notifications (all optional) ───
+# RESEND_API_KEY=""              # Email alerts via Resend
+# RESEND_FROM_EMAIL=""           # e.g. alerts@yourdomain.com
+# TWILIO_ACCOUNT_SID=""          # SMS alerts via Twilio
+# TWILIO_AUTH_TOKEN=""
+# TWILIO_PHONE_NUMBER=""
+# Telegram is configured per-user in Settings → Integrations (no env var needed)
+
+# ─── Seed (optional) ───
+# SEED_ADMIN_EMAIL="admin@localhost"
+# SEED_ADMIN_PASSWORD="changeme"
+
+# ─── Multi-Tenant / SaaS Mode (optional) ───
+# IS_MULTI_TENANT="false"
+# STRIPE_SECRET_KEY=""
+# STRIPE_WEBHOOK_SECRET=""
+# STRIPE_PRICE_ID_PRO=""
+# STRIPE_PRICE_ID_ENTERPRISE=""
 ```
 
 ### Database Setup

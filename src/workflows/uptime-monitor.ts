@@ -175,6 +175,19 @@ async function runSingleCheck(websiteId: string): Promise<void> {
   }
 }
 
+// ─── Steps (fan-out) ────────────────────────────────────────────────────────
+
+async function dispatchChecks(websiteIds: string[]) {
+  "use step"
+
+  const { start } = await import("workflow/api")
+  const { uptimeCheckSingle } = await import("@/workflows/uptime-monitor")
+
+  for (const id of websiteIds) {
+    await start(uptimeCheckSingle, [id])
+  }
+}
+
 // ─── Workflows ──────────────────────────────────────────────────────────────
 
 /** Single health check for one website — short-lived workflow run */
@@ -187,13 +200,11 @@ export async function uptimeCheckSingle(websiteId: string) {
 export async function uptimeScheduler() {
   "use workflow"
 
-  const { start } = await import("workflow/api")
-
   while (true) {
     const ids = await loadUptimeEnabledIds()
 
-    for (const id of ids) {
-      await start(uptimeCheckSingle, [id])
+    if (ids.length > 0) {
+      await dispatchChecks(ids)
     }
 
     await sleep("5m")

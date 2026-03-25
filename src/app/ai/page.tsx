@@ -598,6 +598,10 @@ export default function AIAnalyticsPage() {
     { websiteId: selectedWebsite },
     { enabled: !!selectedWebsite }
   );
+  const { data: scData } = api.searchConsole.getSummary.useQuery(
+    { websiteId: selectedWebsite, days: 30 },
+    { enabled: !!selectedWebsite }
+  );
   const { data: sitemapData } = api.sitemap.getSettings.useQuery(
     { websiteId: selectedWebsite },
     { enabled: !!selectedWebsite }
@@ -657,6 +661,23 @@ export default function AIAnalyticsPage() {
       lines.push(`\nTop Referrers:`);
       for (const r of trafficData.referrers.slice(0, 10)) lines.push(`${r.referrer} — ${r.visitors} visitors`);
     }
+    // Search Console
+    if (scData && scData.totalClicks > 0) {
+      lines.push(`\nSearch Console (last 30 days):`);
+      lines.push(`Total clicks: ${scData.totalClicks.toLocaleString()}, Impressions: ${scData.totalImpressions.toLocaleString()}, Avg CTR: ${scData.avgCtr}%, Avg Position: ${scData.avgPosition}`);
+      if (scData.topQueries.length > 0) {
+        lines.push(`Top Queries:`);
+        for (const q of scData.topQueries.slice(0, 10)) {
+          lines.push(`  "${q.query}" — ${q.clicks} clicks, ${q.impressions} impressions, CTR ${q.ctr}%, pos ${q.position}`);
+        }
+      }
+      if (scData.topPages.length > 0) {
+        lines.push(`Top Pages by Search Clicks:`);
+        for (const p of scData.topPages.slice(0, 5)) {
+          lines.push(`  ${p.page} — ${p.clicks} clicks, ${p.impressions} impressions`);
+        }
+      }
+    }
     // Sitemap status
     if (sitemapData?.sitemapUrl) {
       lines.push(`\nSitemap Status:`);
@@ -672,7 +693,7 @@ export default function AIAnalyticsPage() {
       }
     }
     return lines.join("\n");
-  }, [selectedWebsiteName, insights, anomalies, recommendations, predictions, overviewRows, statsData, trafficData, sitemapData]);
+  }, [selectedWebsiteName, insights, anomalies, recommendations, predictions, overviewRows, statsData, trafficData, scData, sitemapData]);
 
   useEffect(() => { analyticsContextRef.current = analyticsContext; }, [analyticsContext]);
 
