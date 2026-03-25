@@ -54,6 +54,7 @@ import { RingCenter } from "@/components/charts/ring-center";
 import { api } from "@/utils/trpc";
 import { useTimezone } from "@/hooks/use-timezone";
 import { IconHeartRateMonitor } from "@tabler/icons-react";
+import { SourceIcon } from "@/components/ui/source-icon";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -722,6 +723,7 @@ export default function WebsiteDetailsPage() {
                                   key={s.source}
                                   className="flex items-center gap-2 text-sm"
                                 >
+                                  <SourceIcon source={s.source} size={14} />
                                   <div
                                     className="h-2.5 w-2.5 rounded-full shrink-0"
                                     style={{ background: chartColors[i % 5] }}

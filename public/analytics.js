@@ -210,6 +210,9 @@
     const utmTerm = urlParams.get('utm_term');
     const utmContent = urlParams.get('utm_content');
 
+    // Also check common ref/source params (Product Hunt, newsletters, etc.)
+    var refParam = urlParams.get('ref') || urlParams.get('source') || urlParams.get('via');
+
     // Classify traffic source
     let source = 'direct';
     let medium = null;
@@ -221,6 +224,9 @@
     if (utmSource) {
       source = utmSource;
       medium = utmMedium;
+    } else if (refParam) {
+      source = refParam;
+      medium = 'referral';
     } else if (referrer) {
       try {
         const refUrl = new URL(referrer);

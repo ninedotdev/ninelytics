@@ -63,6 +63,7 @@ import { RingChart } from "@/components/charts/ring-chart";
 import { Ring } from "@/components/charts/ring";
 import { RingCenter } from "@/components/charts/ring-center";
 import { CountryFlag } from "@/components/ui/country-flag";
+import { SourceIcon } from "@/components/ui/source-icon";
 
 interface Website {
   id: string;
@@ -850,6 +851,7 @@ function AnalyticsContent() {
                           return (
                             <div key={item.referrer}>
                               <div className="flex items-center gap-2 text-sm mb-1">
+                                <SourceIcon source={item.referrer} size={14} />
                                 <div className="h-2.5 w-2.5 rounded-full shrink-0" style={{ background: chartColors[i % 5] }} />
                                 <span className="truncate font-medium">{item.referrer}</span>
                                 <span className="ml-auto text-muted-foreground tabular-nums text-xs">{item.visitors.toLocaleString()}</span>
@@ -891,8 +893,9 @@ function AnalyticsContent() {
                           return (
                             <div key={item.source}>
                               <div className="flex items-center gap-2 text-sm mb-1">
+                                <SourceIcon source={item.source} size={14} />
                                 <div className="h-2.5 w-2.5 rounded-full shrink-0" style={{ background: chartColors[i % 5] }} />
-                                <span className="truncate font-medium capitalize">{item.source}</span>
+                                <span className="truncate font-medium">{item.source}</span>
                                 <span className="ml-auto text-muted-foreground tabular-nums text-xs">{item.visitors.toLocaleString()}</span>
                                 <span className="text-muted-foreground tabular-nums text-xs w-8 text-right">{pct}%</span>
                               </div>

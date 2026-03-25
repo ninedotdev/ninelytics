@@ -731,11 +731,17 @@ export const analyticsRouter = router({
       .orderBy(desc(sql`count(*)`))
 
     const totalVisitors = sources.reduce((sum, s) => sum + Number(s.count), 0)
-    const trafficSources = sources.map((s) => ({
-      source: s.source ?? "Unknown",
-      visitors: Number(s.count),
-      percentage: totalVisitors > 0 ? Math.round((Number(s.count) / totalVisitors) * 100) : 0,
-    }))
+    const trafficSources = sources.map((s) => {
+      // Normalize source names: strip www., lowercase, trim
+      let name = (s.source ?? "Unknown").trim().toLowerCase().replace(/^www\./, "")
+      // Capitalize first letter only (not CSS capitalize which breaks on dots)
+      name = name.charAt(0).toUpperCase() + name.slice(1)
+      return {
+        source: name,
+        visitors: Number(s.count),
+        percentage: totalVisitors > 0 ? Math.round((Number(s.count) / totalVisitors) * 100) : 0,
+      }
+    })
 
     const campaigns = await ctx.db
       .select({
@@ -758,7 +764,7 @@ export const analyticsRouter = router({
 
     const referrers = await ctx.db
       .select({
-        referrer: visitorSessions.referrer,
+        referrer: sql<string>`COALESCE(${visitorSessions.referrerDomain}, ${visitorSessions.referrer})`.as("referrer"),
         count: sql<number>`count(*)`,
       })
       .from(visitorSessions)
@@ -771,7 +777,7 @@ export const analyticsRouter = router({
           sql`${visitorSessions.referrer} <> ''`
         )
       )
-      .groupBy(visitorSessions.referrer)
+      .groupBy(sql`COALESCE(${visitorSessions.referrerDomain}, ${visitorSessions.referrer})`)
       .orderBy(desc(sql`count(*)`))
       .limit(10)
 
