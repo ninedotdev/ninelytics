@@ -598,6 +598,10 @@ export default function AIAnalyticsPage() {
     { websiteId: selectedWebsite },
     { enabled: !!selectedWebsite }
   );
+  const { data: speedData } = api.speedInsights.getSummary.useQuery(
+    { websiteId: selectedWebsite, period: "30d" },
+    { enabled: !!selectedWebsite }
+  );
   const { data: scData } = api.searchConsole.getSummary.useQuery(
     { websiteId: selectedWebsite, days: 30 },
     { enabled: !!selectedWebsite }
@@ -661,6 +665,17 @@ export default function AIAnalyticsPage() {
       lines.push(`\nTop Referrers:`);
       for (const r of trafficData.referrers.slice(0, 10)) lines.push(`${r.referrer} — ${r.visitors} visitors`);
     }
+    // Speed Insights (Core Web Vitals)
+    if (speedData?.vitals?.length) {
+      lines.push(`\nSpeed Insights (Core Web Vitals, last 30 days):`);
+      if (speedData.res != null) lines.push(`Real Experience Score (RES): ${speedData.res}/100`);
+      lines.push(`Metric | P75 | Good% | Poor% | Samples`);
+      for (const v of speedData.vitals) {
+        const unit = v.name === "CLS" ? "" : "ms";
+        const val = v.name === "CLS" ? (v.p75 / 1000).toFixed(3) : `${v.p75}${unit}`;
+        lines.push(`${v.name} | ${val} | ${v.goodPct}% good | ${v.poorPct}% poor | ${v.count} samples`);
+      }
+    }
     // Search Console
     if (scData && scData.totalClicks > 0) {
       lines.push(`\nSearch Console (last 30 days):`);
@@ -693,7 +708,7 @@ export default function AIAnalyticsPage() {
       }
     }
     return lines.join("\n");
-  }, [selectedWebsiteName, insights, anomalies, recommendations, predictions, overviewRows, statsData, trafficData, scData, sitemapData]);
+  }, [selectedWebsiteName, insights, anomalies, recommendations, predictions, overviewRows, statsData, trafficData, speedData, scData, sitemapData]);
 
   useEffect(() => { analyticsContextRef.current = analyticsContext; }, [analyticsContext]);
 
