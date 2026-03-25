@@ -157,15 +157,28 @@ async function loadPendingGoogleUrls(websiteId: string): Promise<string[]> {
       eq(sitemapUrls.googleStatus, "error")
     ))
 
+  const { sql, lte } = await import("drizzle-orm")
+
+  // Include: never submitted (pending) + submitted but not yet indexed (re-verify after 24h)
+  const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+
   const rows = await db
     .select({ url: sitemapUrls.url })
     .from(sitemapUrls)
     .where(and(
       eq(sitemapUrls.websiteId, websiteId),
-      isNull(sitemapUrls.googleSubmittedAt)
+      or(
+        // Never submitted
+        isNull(sitemapUrls.googleSubmittedAt),
+        // Submitted but not yet indexed — re-check every 24h
+        and(
+          eq(sitemapUrls.googleStatus, "submitted"),
+          lte(sitemapUrls.googleSubmittedAt, oneDayAgo)
+        )
+      )
     ))
 
-  console.log(`[sitemap] ${rows.length} URLs pending Google submission`)
+  console.log(`[sitemap] ${rows.length} URLs pending Google check/submission`)
   return rows.map((r) => r.url)
 }
 
