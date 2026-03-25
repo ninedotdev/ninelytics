@@ -310,45 +310,87 @@ export default function SpeedInsightsPage() {
               </CardContent>
             </Card>
 
-            {/* Vital Cards */}
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+            {/* Vital Cards — radial gauges */}
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
               {VITAL_ORDER.map((vitalName) => {
                 const vital = summary!.vitals.find((v) => v.name === vitalName);
                 const info = VITAL_LABELS[vitalName];
                 if (!vital) {
                   return (
                     <Card key={vitalName} className="opacity-50">
-                      <CardContent className="p-4">
-                        <p className="text-xs text-muted-foreground">{info.description}</p>
-                        <p className="text-xl font-bold mt-1">—</p>
-                        <p className="text-xs text-muted-foreground mt-1 font-mono">{info.label}</p>
+                      <CardContent className="p-5 flex flex-col items-center text-center">
+                        <p className="text-xs font-mono font-semibold text-muted-foreground">{info.label}</p>
+                        <div className="relative w-24 h-24 mt-2"><svg viewBox="0 0 36 36" className="w-24 h-24"><circle cx="18" cy="18" r="14" fill="none" strokeWidth="2.5" className="stroke-muted/20" /></svg></div>
+                        <p className="text-lg font-bold mt-1">—</p>
                       </CardContent>
                     </Card>
                   );
                 }
                 const rating = vitalRating(vitalName, vital.p75);
+                const goodPct = Math.round(Math.min(vital.goodPct, 100) * 10) / 10;
+                const poorPct = Math.round(Math.min(vital.poorPct ?? 0, 100) * 10) / 10;
+                const needsPct = Math.round(Math.max(0, 100 - goodPct - poorPct) * 10) / 10;
+
+                // SVG ring math: circumference of r=14 = 2*PI*14 ≈ 87.96
+                const C = 2 * Math.PI * 14;
+                const goodArc = (goodPct / 100) * C;
+                const needsArc = (needsPct / 100) * C;
+                const poorArc = (poorPct / 100) * C;
+
                 return (
                   <Card
                     key={vitalName}
-                    className={`cursor-pointer transition-colors ${selectedVital === vitalName ? "ring-2 ring-primary" : ""}`}
+                    className={`cursor-pointer transition-all ${selectedVital === vitalName ? "ring-2 ring-primary" : "hover:border-foreground/20"}`}
                     onClick={() => setSelectedVital(vitalName)}
                   >
-                    <CardContent className="p-4">
-                      <div className="flex items-center justify-between mb-2">
-                        <p className="text-xs font-mono font-semibold text-muted-foreground">{info.label}</p>
-                        {getRatingIcon(rating)}
+                    <CardContent className="p-4 flex flex-col items-center text-center">
+                      <p className="text-[11px] font-mono font-semibold text-muted-foreground tracking-wide">{info.label}</p>
+
+                      {/* Multi-segment radial gauge */}
+                      <div className="relative w-32 h-32 my-3">
+                        <svg viewBox="0 0 36 36" className="w-32 h-32 -rotate-90">
+                          {/* Background track */}
+                          <circle cx="18" cy="18" r="14" fill="none" strokeWidth="2.5" className="stroke-muted/15" />
+                          {/* Good (green) */}
+                          <circle cx="18" cy="18" r="14" fill="none" strokeWidth="2.5"
+                            stroke="#22c55e"
+                            strokeDasharray={`${goodArc} ${C - goodArc}`}
+                            strokeDashoffset="0"
+                            style={{ transition: "stroke-dasharray 0.8s ease" }}
+                          />
+                          {/* Needs improvement (yellow) */}
+                          {needsPct > 0 && (
+                            <circle cx="18" cy="18" r="14" fill="none" strokeWidth="2.5"
+                              stroke="#eab308"
+                              strokeDasharray={`${needsArc} ${C - needsArc}`}
+                              strokeDashoffset={`${-goodArc}`}
+                              style={{ transition: "stroke-dasharray 0.8s ease" }}
+                            />
+                          )}
+                          {/* Poor (red) */}
+                          {poorPct > 0 && (
+                            <circle cx="18" cy="18" r="14" fill="none" strokeWidth="2.5"
+                              stroke="#ef4444"
+                              strokeDasharray={`${poorArc} ${C - poorArc}`}
+                              strokeDashoffset={`${-(goodArc + needsArc)}`}
+                              style={{ transition: "stroke-dasharray 0.8s ease" }}
+                            />
+                          )}
+                        </svg>
+                        <div className="absolute inset-0 flex flex-col items-center justify-center">
+                          <span className={`text-lg font-bold tabular-nums leading-none ${getRatingColor(rating)}`}>
+                            {formatValue(vitalName, vital.p75)}
+                          </span>
+                          <span className="text-[9px] text-muted-foreground mt-0.5">p75</span>
+                        </div>
                       </div>
-                      <p className={`text-2xl font-bold tabular-nums ${getRatingColor(rating)}`}>
-                        {formatValue(vitalName, vital.p75)}
-                      </p>
-                      <p className="text-xs text-muted-foreground mt-1">p75</p>
-                      {/* Distribution bar: good / needs-improvement / poor */}
-                      <div className="mt-2 h-1.5 w-full rounded-full overflow-hidden flex">
-                        <div className="bg-green-500 h-full" style={{ width: `${vital.goodPct}%` }} />
-                        <div className="bg-yellow-500 h-full" style={{ width: `${Math.max(0, 100 - vital.goodPct - (vital.poorPct ?? 0))}%` }} />
-                        <div className="bg-red-500 h-full" style={{ width: `${vital.poorPct ?? 0}%` }} />
+
+                      {/* Legend */}
+                      <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
+                        <span className="flex items-center gap-0.5"><span className="w-1.5 h-1.5 rounded-full bg-green-500" />{goodPct}%</span>
+                        {needsPct > 0 && <span className="flex items-center gap-0.5"><span className="w-1.5 h-1.5 rounded-full bg-yellow-500" />{needsPct}%</span>}
+                        {poorPct > 0 && <span className="flex items-center gap-0.5"><span className="w-1.5 h-1.5 rounded-full bg-red-500" />{poorPct}%</span>}
                       </div>
-                      <p className="text-[10px] text-muted-foreground mt-1">{vital.goodPct}% good</p>
                     </CardContent>
                   </Card>
                 );
