@@ -4,6 +4,10 @@ A self-hosted, privacy-first web analytics platform built with Next.js. Track pa
 
 ![Dashboard](public/repo/dashboard.png)
 
+> **Does it scale?** This has been running 13+ websites, including a county government site processing thousands of events, on a laptop behind a Cloudflare Tunnel. 1.5% CPU, 474 MB RAM, the 4 containers.
+>
+> ![Metrics](public/repo/metrics.png)
+
 ---
 
 ## Features
@@ -46,20 +50,24 @@ A self-hosted, privacy-first web analytics platform built with Next.js. Track pa
   <img src="public/repo/ai-2.png" width="49%" />
 </p>
 
+**Documentation — setup guides for all integrations**
+
+![Docs](public/repo/docs.png)
+
 ---
 
 ## Integrations
 
 All integrations are optional and configured from the Settings page (credentials) and per-website settings (linking). Historical data merges with live tracking — no gaps when migrating.
 
-| Integration | Auth method | What it imports |
-|---|---|---|
-| **Cloudflare** | API Token (per-user) | Historical pageviews, visitors, top countries/devices/pages/browsers |
-| **Google Analytics 4** | OAuth (per-user) | Historical pageviews, visitors, breakdowns (countries, devices, pages, browsers) |
-| **Google Search Console** | OAuth (same as GA4) | Search queries, clicks, impressions, CTR, avg position (90 days) |
-| **Stripe** | Restricted API key (per-website) | Daily revenue, refunds, charges, new customers (90 days) |
-| **PostHog** | Personal API key + Project ID (per-website) | Pageviews, visitors, sessions, bounce rate, duration, countries, cities, devices, browsers, OS, pages, referrers (365 days) |
-| **Sitemap / IndexNow** | Auto-generated key (per-website) | Pushes new URLs to Google Indexing API and IndexNow (Bing, Yandex, …) whenever the sitemap changes |
+| Integration               | Auth method                                 | What it imports                                                                                                             |
+| ------------------------- | ------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| **Cloudflare**            | API Token (per-user)                        | Historical pageviews, visitors, top countries/devices/pages/browsers                                                        |
+| **Google Analytics 4**    | OAuth (per-user)                            | Historical pageviews, visitors, breakdowns (countries, devices, pages, browsers)                                            |
+| **Google Search Console** | OAuth (same as GA4)                         | Search queries, clicks, impressions, CTR, avg position (90 days)                                                            |
+| **Stripe**                | Restricted API key (per-website)            | Daily revenue, refunds, charges, new customers (90 days)                                                                    |
+| **PostHog**               | Personal API key + Project ID (per-website) | Pageviews, visitors, sessions, bounce rate, duration, countries, cities, devices, browsers, OS, pages, referrers (365 days) |
+| **Sitemap / IndexNow**    | Auto-generated key (per-website)            | Pushes new URLs to Google Indexing API and IndexNow (Bing, Yandex, …) whenever the sitemap changes                          |
 
 Google Analytics and Search Console share a single OAuth connection — one "Connect with Google" click grants access to both.
 
@@ -71,23 +79,23 @@ All imports use source-specific prefixes (`import-cf-`, `import-ga-`, `import-ph
 
 ## Tech Stack
 
-| Layer | Technology |
-|---|---|
-| Framework | [Next.js 16](https://nextjs.org) (App Router, Turbopack) |
-| Language | TypeScript 6 (strict) |
-| API | [tRPC v11](https://trpc.io) + [TanStack Query v5](https://tanstack.com/query) |
-| Database | PostgreSQL via [Drizzle ORM](https://orm.drizzle.team) |
-| Cache / Rate limiting | Redis via [ioredis](https://github.com/redis/ioredis) |
-| Auth | [NextAuth.js v4](https://next-auth.js.org) with Drizzle adapter |
-| UI Components | [shadcn/ui](https://ui.shadcn.com) + [Radix UI](https://www.radix-ui.com) primitives |
-| Icons | [Tabler Icons](https://tabler.io/icons) |
-| Styling | [Tailwind CSS v4](https://tailwindcss.com) |
-| Charts | Custom visx-based charts (Area, Bar, Ring) + [Recharts](https://recharts.org) sparklines |
-| Maps | [MapLibre GL](https://maplibre.org) + [MapCN](https://www.mapcn.dev) tiles + [MaxMind GeoIP2](https://www.maxmind.com) |
-| AI | [OpenAI](https://platform.openai.com) (GPT-5.4), [Anthropic](https://anthropic.com) (Claude Sonnet/Opus 4.6), [Google](https://ai.google.dev) (Gemini 3.1 Flash Lite) |
-| Forms | [React Hook Form](https://react-hook-form.com) + [Zod](https://zod.dev) validation |
-| State | [Zustand](https://zustand-demo.pmnd.rs) + [SWR](https://swr.vercel.app) |
-| Deployment | [Coolify](https://coolify.io) (self-hosted) |
+| Layer                 | Technology                                                                                                                                                            |
+| --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Framework             | [Next.js 16](https://nextjs.org) (App Router, Turbopack)                                                                                                              |
+| Language              | TypeScript 6 (strict)                                                                                                                                                 |
+| API                   | [tRPC v11](https://trpc.io) + [TanStack Query v5](https://tanstack.com/query)                                                                                         |
+| Database              | PostgreSQL 17 + [TimescaleDB](https://www.timescale.com) via [Drizzle ORM](https://orm.drizzle.team) — hypertables auto-partition time-series tables for fast queries at scale |
+| Cache / Rate limiting | Redis via [ioredis](https://github.com/redis/ioredis)                                                                                                                 |
+| Auth                  | [NextAuth.js v4](https://next-auth.js.org) with Drizzle adapter                                                                                                       |
+| UI Components         | [shadcn/ui](https://ui.shadcn.com) + [Radix UI](https://www.radix-ui.com) primitives                                                                                  |
+| Icons                 | [Tabler Icons](https://tabler.io/icons)                                                                                                                               |
+| Styling               | [Tailwind CSS v4](https://tailwindcss.com)                                                                                                                            |
+| Charts                | Custom visx-based charts (Area, Bar, Ring) + [Recharts](https://recharts.org) sparklines                                                                              |
+| Maps                  | [MapLibre GL](https://maplibre.org) + [MapCN](https://www.mapcn.dev) tiles + [MaxMind GeoIP2](https://www.maxmind.com)                                                |
+| AI                    | [OpenAI](https://platform.openai.com) (GPT-5.4), [Anthropic](https://anthropic.com) (Claude Sonnet/Opus 4.6), [Google](https://ai.google.dev) (Gemini 3.1 Flash Lite) |
+| Forms                 | [React Hook Form](https://react-hook-form.com) + [Zod](https://zod.dev) validation                                                                                    |
+| State                 | [Zustand](https://zustand-demo.pmnd.rs) + [SWR](https://swr.vercel.app)                                                                                               |
+| Deployment            | [Coolify](https://coolify.io) (self-hosted)                                                                                                                           |
 
 ---
 
@@ -249,13 +257,15 @@ Add this snippet to any website you want to track:
 The tracker automatically captures pageviews, sessions, scroll depth, rage clicks, and performance metrics.
 
 **Custom events:**
+
 ```js
-window.analytics.track('purchase', { amount: 49.99, plan: 'pro' })
+window.analytics.track("purchase", { amount: 49.99, plan: "pro" });
 ```
 
 **Conversion goals:**
+
 ```js
-window.analytics.goal('signup', 1)
+window.analytics.goal("signup", 1);
 ```
 
 ### Analytics Consent Banner
@@ -263,6 +273,7 @@ window.analytics.goal('signup', 1)
 The tracker includes a built-in GDPR consent banner. Enable it in website settings → Consent tab.
 
 When enabled:
+
 - No tracking occurs until the user explicitly accepts
 - No cookies, localStorage, or network requests before consent
 - Banner renders in Shadow DOM (no style conflicts with your site)
@@ -271,10 +282,10 @@ When enabled:
 
 ```js
 // Check consent status programmatically
-window.analytics.consent()
+window.analytics.consent();
 
 // Reset consent and show banner again
-window.analytics.resetConsent()
+window.analytics.resetConsent();
 ```
 
 Configure the banner in **Website Settings → Consent** tab.
@@ -302,6 +313,7 @@ pnpm db:maxmind        # Download MaxMind GeoIP database
 The platform uses **browser-detected timezones** — each user sees stats ("Visitors Today", "Last 7 Days", etc.) in their own local timezone. The browser timezone is detected automatically via `Intl.DateTimeFormat().resolvedOptions().timeZone` and sent with each API request.
 
 **How it works:**
+
 - The tracking script always stores timestamps in **UTC** in the database
 - When querying stats, the client sends its timezone (e.g. `America/New_York`) as a parameter
 - PostgreSQL converts timestamps using `AT TIME ZONE` at query time
@@ -327,12 +339,12 @@ Enable automatic indexing from **Website Settings → Indexing** tab. Once enabl
 
 ### URL statuses
 
-| Status | Meaning |
-|---|---|
-| `pending` | In the sitemap, not yet checked or submitted |
-| `submitted` | Sent to Google Indexing API, awaiting crawl |
-| `indexed` | Confirmed indexed via URL Inspection API |
-| `error` | Submission failed (retried on next run) |
+| Status      | Meaning                                      |
+| ----------- | -------------------------------------------- |
+| `pending`   | In the sitemap, not yet checked or submitted |
+| `submitted` | Sent to Google Indexing API, awaiting crawl  |
+| `indexed`   | Confirmed indexed via URL Inspection API     |
+| `error`     | Submission failed (retried on next run)      |
 
 ### Google — required setup
 
@@ -400,6 +412,7 @@ docker compose exec app npx tsx scripts/seed.ts
 Open `http://localhost:3000` — login with the seed credentials.
 
 **Architecture:**
+
 ```
 Client → :3000 → [app] → :6432 → [pgbouncer] → :5432 → [postgres]
                        → :6379 → [dragonfly]

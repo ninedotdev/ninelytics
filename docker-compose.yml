@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: postgres:17-alpine
+    image: timescale/timescaledb:latest-pg17
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${DB_NAME:-ninelytics}
@@ -93,8 +93,8 @@ services:
       # ─── Seed ───
       SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL:-admin@localhost}
       SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-admin}
-    ports:
-      - "${PORT:-3000}:3000"
+    expose:
+      - "3000"
     depends_on:
       pgbouncer:
         condition: service_healthy
@@ -102,8 +102,18 @@ services:
         condition: service_started
     command: >
       sh -c "
+        echo '── Enabling TimescaleDB extension...' &&
+        PGPASSWORD=${DB_PASSWORD} psql -h postgres -U ${DB_USER:-postgres} -d ${DB_NAME:-ninelytics} -c 'CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;' 2>/dev/null || true &&
         echo '── Pushing database schema...' &&
         DATABASE_URL=postgresql://${DB_USER:-postgres}:${DB_PASSWORD}@postgres:5432/${DB_NAME:-ninelytics} npx drizzle-kit push --force &&
+        echo '── Creating hypertables...' &&
+        PGPASSWORD=${DB_PASSWORD} psql -h postgres -U ${DB_USER:-postgres} -d ${DB_NAME:-ninelytics} -c \"
+          SELECT create_hypertable('page_views', 'timestamp', if_not_exists => TRUE, migrate_data => TRUE);
+          SELECT create_hypertable('events', 'timestamp', if_not_exists => TRUE, migrate_data => TRUE);
+          SELECT create_hypertable('visitor_sessions', 'created_at', if_not_exists => TRUE, migrate_data => TRUE);
+          SELECT create_hypertable('uptime_checks', 'checked_at', if_not_exists => TRUE, migrate_data => TRUE);
+          SELECT create_hypertable('web_vitals', 'recorded_at', if_not_exists => TRUE, migrate_data => TRUE);
+        \" 2>/dev/null || true &&
         echo '── Starting Ninelytics...' &&
         node server.js
       "

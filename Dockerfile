@@ -26,6 +26,9 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 
+# psql for TimescaleDB hypertable setup at startup
+RUN apk add --no-cache postgresql17-client
+
 RUN addgroup --system --gid 1001 nodejs && \
     adduser --system --uid 1001 nextjs
 
@@ -41,8 +44,8 @@ COPY --from=builder /app/drizzle.config.ts ./drizzle.config.ts
 COPY --from=builder /app/src/server/db ./src/server/db
 COPY --from=builder /app/tsconfig.json ./tsconfig.json
 
-# MaxMind GeoIP database directory
-RUN mkdir -p /var/data && chown nextjs:nodejs /var/data
+# Writable directories for non-root user
+RUN mkdir -p /var/data /app/.next/cache && chown -R nextjs:nodejs /var/data /app/.next
 
 USER nextjs
 
