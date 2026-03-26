@@ -42,3 +42,8 @@ next-env.d.ts
 
 # MaxMind GeoIP database (large binary, downloaded via npm run db:maxmind)
 /data/*.mmdb
+
+# Database dumps
+*.dmp
+*.dump
+*.sql.gz

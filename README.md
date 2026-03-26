@@ -1,6 +1,8 @@
-# Analytics Platform
+# Ninelytics
 
 A self-hosted, privacy-first web analytics platform built with Next.js. Track pageviews, events, sessions, and conversions across multiple websites from a single dashboard — with real-time data, AI-powered insights, geo-location maps, custom reports, and goal tracking.
+
+![Dashboard](public/repo/dashboard.png)
 
 ---
 
@@ -11,7 +13,7 @@ A self-hosted, privacy-first web analytics platform built with Next.js. Track pa
 - **Interactive map** — visitor geo-location powered by MapLibre GL and MaxMind
 - **Custom reports** — build and save your own report queries
 - **Goal tracking** — define pageview, event, and duration goals with conversion funnels
-- **AI assistant** — ask questions about your data in natural language via OpenAI
+- **AI assistant** — ask questions about your data in natural language (GPT, Claude, Gemini)
 - **Role-based access** — Admin, Owner, and Viewer roles with per-website permissions
 - **Dark / light theme** — system-aware with manual toggle
 - **Analytics consent** — built-in GDPR-friendly consent banner with granular controls
@@ -26,6 +28,23 @@ A self-hosted, privacy-first web analytics platform built with Next.js. Track pa
 - **Performance badges** — automatic website health indicators (On Fire, Growing, Steady, Declining, Inactive)
 - **Browser-driven timezone** — all stats respect the user's local timezone automatically
 - **Export** — download analytics as CSV, Excel, or JSON
+
+### Screenshots
+
+**Charts & Analytics**
+
+<p>
+  <img src="public/repo/charts-1.png" width="32%" />
+  <img src="public/repo/charts-2.png" width="32%" />
+  <img src="public/repo/charts-3.png" width="32%" />
+</p>
+
+**AI Insights — chat with your analytics data, generate charts on demand**
+
+<p>
+  <img src="public/repo/ai-1.png" width="49%" />
+  <img src="public/repo/ai-2.png" width="49%" />
+</p>
 
 ---
 
@@ -144,8 +163,8 @@ src/
 ### Installation
 
 ```bash
-git clone <repo-url>
-cd analitics
+git clone https://github.com/ninedotdev/ninelytics.git
+cd ninelytics
 pnpm install
 ```
 
@@ -362,7 +381,57 @@ The background workflow handles everything without manual intervention:
 
 ## Deployment
 
-The project is configured for self-hosted deployment via [Coolify](https://coolify.io). Set all environment variables in the Coolify dashboard and point to your PostgreSQL and Redis instances.
+### Docker Compose (recommended)
+
+The included `docker-compose.yml` runs the full stack: **PostgreSQL 17 + PgBouncer + Dragonfly (Redis) + Next.js app**.
+
+```bash
+# 1. Copy and configure environment
+cp docker.env.example .env
+# Edit .env — set at minimum: DB_PASSWORD, NEXTAUTH_SECRET, APP_URL
+
+# 2. Start everything
+docker compose up -d
+
+# 3. (First run only) Seed the admin user
+docker compose exec app npx tsx scripts/seed.ts
+```
+
+Open `http://localhost:3000` — login with the seed credentials.
+
+**Architecture:**
+```
+Client → :3000 → [app] → :6432 → [pgbouncer] → :5432 → [postgres]
+                       → :6379 → [dragonfly]
+```
+
+- **PgBouncer** — connection pooler in transaction mode (20 pool size, 1000 max clients). Eliminates per-request connection overhead.
+- **Dragonfly** — Redis-compatible in-memory store, 25x faster than Redis. Handles real-time analytics, notifications, rate limiting.
+- **Schema migrations** run automatically on startup via `drizzle-kit push`.
+
+### Coolify
+
+1. **New Resource** → select your Git repository
+2. In **Build Pack**, choose **Docker Compose**
+3. In **Docker Compose Location**, enter `docker-compose.yml`
+4. Add environment variables in the Coolify UI:
+   - `DB_PASSWORD`, `NEXTAUTH_SECRET`, `APP_URL` (required)
+   - `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_AI_API_KEY` (optional, for AI)
+   - See `docker.env.example` for all options
+5. Deploy — Coolify builds the image, starts all 4 services (PostgreSQL, PgBouncer, Dragonfly, App)
+
+### Manual (without Docker)
+
+```bash
+# Prerequisites: Node 22+, pnpm, PostgreSQL, Redis/Dragonfly
+pnpm install
+pnpm build
+pnpm drizzle:push
+pnpm db:seed
+pnpm start
+```
+
+Set all environment variables from `.env.example` before starting.
 
 ---
 

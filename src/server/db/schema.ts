@@ -406,7 +406,6 @@ export const visitors = pgTable(
   },
   (table) => ({
     websiteVisitorKey: uniqueIndex("visitors_website_id_visitor_id_key").on(table.websiteId, table.visitorId),
-    visitorIdKey: uniqueIndex("visitors_visitor_id_key").on(table.visitorId),
     idxWebsiteCreatedAt: index("visitors_website_id_created_at_idx").on(table.websiteId, table.createdAt),
     idxWebsiteDevice: index("visitors_website_id_device_idx").on(table.websiteId, table.device),
     idxWebsiteBrowser: index("visitors_website_id_browser_idx").on(table.websiteId, table.browser),
@@ -447,7 +446,6 @@ export const visitorSessions = pgTable(
     updatedAt: timestamp("updated_at", { mode: "string" }).defaultNow().notNull(),
   },
   (table) => ({
-    sessionIdKey: uniqueIndex("visitor_sessions_session_id_key").on(table.sessionId),
     websiteSessionKey: uniqueIndex("visitor_sessions_website_id_session_id_key").on(table.websiteId, table.sessionId),
     idxWebsiteCreatedAt: index("visitor_sessions_website_id_created_at_idx").on(table.websiteId, table.createdAt),
     idxVisitorId: index("visitor_sessions_visitor_id_idx").on(table.visitorId),

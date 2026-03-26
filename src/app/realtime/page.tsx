@@ -160,43 +160,98 @@ export default function RealtimePage() {
           </Card>
         </div>
 
-        {/* Main grid */}
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
-          {/* Live Events — 3 cols */}
-          <Card className="md:col-span-2 lg:col-span-3">
+        {/* Active Visitors + Top Pages — side by side */}
+        <div className="grid gap-4 md:grid-cols-2">
+          <Card>
             <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-medium">Live Events</CardTitle>
+              <CardTitle className="text-sm font-medium">Active Visitors</CardTitle>
             </CardHeader>
             <CardContent>
-              <div ref={scrollRef} className="relative h-[300px] md:h-[420px] overflow-y-auto scroll-smooth" style={{ maskImage: 'linear-gradient(to bottom, black 85%, transparent 100%)', WebkitMaskImage: 'linear-gradient(to bottom, black 85%, transparent 100%)' }}>
+              <div className="space-y-1.5 max-h-[200px] overflow-y-auto">
+                {data.visitors.length > 0 ? (
+                  data.visitors.map((v) => (
+                    <div key={v.visitorId} className="flex items-center gap-2 text-sm py-1 min-w-0">
+                      <DeviceIcon device={v.device} size={14} />
+                      <span className="truncate flex-1 text-foreground/90">{v.page}</span>
+                      <CountryFlag countryCode={v.country} size={14} />
+                      <span className="text-xs text-muted-foreground shrink-0">
+                        {v.city !== "Unknown" ? v.city : v.country}
+                      </span>
+                      <span className="text-[11px] text-muted-foreground tabular-nums">
+                        {formatRelativeTime(parseInt(v.lastSeen))}
+                      </span>
+                    </div>
+                  ))
+                ) : (
+                  <p className="text-sm text-muted-foreground py-4 text-center">No active visitors</p>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm font-medium">Top Pages</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-2 max-h-[200px] overflow-y-auto">
+                {data.activePages.length > 0 ? (
+                  data.activePages.map((p) => {
+                    const max = data.activePages[0]?.viewers ?? 1;
+                    return (
+                      <div key={p.page} className="space-y-1">
+                        <div className="flex items-center justify-between text-xs gap-2 min-w-0">
+                          <span className="truncate text-foreground/90 min-w-0">{p.page}</span>
+                          <span className="text-muted-foreground tabular-nums font-medium">{p.viewers}</span>
+                        </div>
+                        <div className="bg-muted h-1 rounded-full">
+                          <div className="h-full rounded-full bg-primary/85 transition-all duration-500" style={{ width: `${(p.viewers / max) * 100}%` }} />
+                        </div>
+                      </div>
+                    );
+                  })
+                ) : (
+                  <p className="text-sm text-muted-foreground py-4 text-center">No active pages</p>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Live Events + Locations */}
+        <div className="grid gap-4 lg:grid-cols-3">
+          {/* Live Events — full feed */}
+          <Card className="lg:col-span-2">
+            <CardHeader className="pb-3">
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-sm font-medium">Live Events</CardTitle>
+                <span className="text-[10px] text-muted-foreground tabular-nums">{displayEvents.length} events</span>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div ref={scrollRef} className="relative h-[350px] md:h-[450px] overflow-y-auto" style={{ maskImage: "linear-gradient(to bottom, black 90%, transparent 100%)", WebkitMaskImage: "linear-gradient(to bottom, black 90%, transparent 100%)" }}>
                 {displayEvents.length > 0 ? (
                   <div className="space-y-px">
-                    {displayEvents.slice(0, 20).map((event, index) => {
-                      return (
-                        <div
-                          key={event._key}
-                          className="flex items-center gap-2 rounded-md px-2 py-2 min-w-0"
-                        >
-                          {/* Color dot */}
-                          <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${getEventDot(event.type)}`} />
-
-                          {/* Event content */}
-                          <div className="flex-1 min-w-0 overflow-hidden">
-                            <span className="text-sm truncate block">
-                              {formatEventMessage(event.type, event.name, event.properties || {})}
-                            </span>
-                            <span className="text-muted-foreground text-[11px] truncate block">
-                              {event.page}
-                            </span>
-                          </div>
-
-                          {/* Time */}
-                          <span className="text-[11px] text-muted-foreground tabular-nums shrink-0">
-                            {formatRelativeTime(event.timestamp)}
+                    {displayEvents.slice(0, 30).map((event, index) => (
+                      <div
+                        key={event._key}
+                        className="flex items-center gap-2.5 rounded-md px-2.5 py-2 min-w-0 hover:bg-muted/50 transition-colors"
+                        style={{
+                          animation: index < 3 ? `slideIn 0.4s ease-out ${index * 0.08}s both` : undefined,
+                        }}
+                      >
+                        <span className={`h-2 w-2 shrink-0 rounded-full ${getEventDot(event.type)} ${index === 0 ? "animate-pulse" : ""}`} />
+                        <div className="flex-1 min-w-0 overflow-hidden">
+                          <span className="text-sm truncate block">
+                            {formatEventMessage(event.type, event.name, event.properties || {})}
                           </span>
+                          <span className="text-muted-foreground text-[11px] truncate block">{event.page}</span>
                         </div>
-                      );
-                    })}
+                        <span className="text-[11px] text-muted-foreground tabular-nums shrink-0">
+                          {formatRelativeTime(event.timestamp)}
+                        </span>
+                      </div>
+                    ))}
                   </div>
                 ) : (
                   <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
@@ -204,100 +259,51 @@ export default function RealtimePage() {
                     <p className="text-xs mt-1">Events appear here as they happen</p>
                   </div>
                 )}
-
               </div>
             </CardContent>
           </Card>
 
-          {/* Right column — 2 cols */}
-          <div className="lg:col-span-2 space-y-4">
-            {/* Active Visitors */}
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-sm font-medium">Active Visitors</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-2 max-h-[150px] md:max-h-[200px] overflow-y-auto">
-                  {data.visitors.length > 0 ? (
-                    data.visitors.map((v) => (
-                      <div key={v.visitorId} className="flex items-center gap-2 text-sm py-1 min-w-0">
-                        <DeviceIcon device={v.device} size={14} />
-                        <span className="truncate flex-1 text-foreground/90">{v.page}</span>
-                        <span className="text-xs text-muted-foreground shrink-0">
-                          {v.city !== "Unknown" ? v.city : v.country}
-                        </span>
-                        <span className="text-[11px] text-muted-foreground tabular-nums">
-                          {formatRelativeTime(parseInt(v.lastSeen))}
-                        </span>
+          {/* Locations */}
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm font-medium">Locations</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-1.5">
+                {data.geography.length > 0 ? (
+                  [...data.geography]
+                    .sort((a, b) => b.count - a.count)
+                    .slice(0, 8)
+                    .map((geo) => (
+                      <div key={geo.country} className="flex items-center justify-between py-0.5">
+                        <div className="flex items-center gap-2">
+                          <CountryFlag countryCode={geo.country} size={16} />
+                          <span className="text-sm text-foreground/90">{geo.country}</span>
+                        </div>
+                        <span className="text-xs text-muted-foreground tabular-nums font-medium">{geo.count}</span>
                       </div>
                     ))
-                  ) : (
-                    <p className="text-sm text-muted-foreground py-4 text-center">No active visitors</p>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Active Pages */}
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-sm font-medium">Top Pages</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-2">
-                  {data.activePages.length > 0 ? (
-                    data.activePages.map((p) => {
-                      const max = data.activePages[0]?.viewers ?? 1;
-                      return (
-                        <div key={p.page} className="space-y-1">
-                          <div className="flex items-center justify-between text-xs gap-2 min-w-0">
-                            <span className="truncate text-foreground/90 min-w-0">{p.page}</span>
-                            <span className="text-muted-foreground tabular-nums font-medium">{p.viewers}</span>
-                          </div>
-                          <div className="bg-muted h-1 rounded-full">
-                            <div
-                              className="h-full rounded-full bg-primary/85 transition-all"
-                              style={{ width: `${(p.viewers / max) * 100}%` }}
-                            />
-                          </div>
-                        </div>
-                      );
-                    })
-                  ) : (
-                    <p className="text-sm text-muted-foreground py-4 text-center">No active pages</p>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Countries */}
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-sm font-medium">Locations</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-1.5">
-                  {data.geography.length > 0 ? (
-                    [...data.geography]
-                      .sort((a, b) => b.count - a.count)
-                      .slice(0, 6)
-                      .map((geo) => (
-                        <div key={geo.country} className="flex items-center justify-between py-0.5">
-                          <div className="flex items-center gap-2">
-                            <CountryFlag countryCode={geo.country} size={16} />
-                            <span className="text-sm text-foreground/90">{geo.country}</span>
-                          </div>
-                          <span className="text-xs text-muted-foreground tabular-nums font-medium">{geo.count}</span>
-                        </div>
-                      ))
-                  ) : (
-                    <p className="text-sm text-muted-foreground py-4 text-center">No location data</p>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-          </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground py-4 text-center">No location data</p>
+                )}
+              </div>
+            </CardContent>
+          </Card>
         </div>
+
+        {/* Slide-in animation for new events */}
+        <style jsx global>{`
+          @keyframes slideIn {
+            from {
+              opacity: 0;
+              transform: translateY(-8px);
+            }
+            to {
+              opacity: 1;
+              transform: translateY(0);
+            }
+          }
+        `}</style>
       </div>
     </AppLayout>
   );

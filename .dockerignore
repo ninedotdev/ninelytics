@@ -1,0 +1,11 @@
+node_modules
+.next
+.git
+.env
+.env.local
+*.md
+.claude
+.arrow-js
+*.dmp
+*.dump
+*.sql.gz

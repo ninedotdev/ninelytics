@@ -2,6 +2,7 @@ import { withWorkflow } from "workflow/next";
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  output: "standalone",
   serverExternalPackages: ["@workflow/world-postgres"],
   env: {
     NEXT_PUBLIC_IS_MULTI_TENANT: process.env.IS_MULTI_TENANT || "false",

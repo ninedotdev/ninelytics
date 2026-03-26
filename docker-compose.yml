@@ -1,0 +1,119 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME:-ninelytics}
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - ninelytics
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres}"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  pgbouncer:
+    image: edoburu/pgbouncer:latest
+    restart: unless-stopped
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ${DB_NAME:-ninelytics}
+      DB_USER: ${DB_USER:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD}
+      LISTEN_PORT: 6432
+      AUTH_TYPE: scram-sha-256
+      POOL_MODE: transaction
+      MAX_CLIENT_CONN: 1000
+      DEFAULT_POOL_SIZE: 20
+      MIN_POOL_SIZE: 5
+      RESERVE_POOL_SIZE: 5
+      SERVER_RESET_QUERY: DISCARD ALL
+      IGNORE_STARTUP_PARAMETERS: extra_float_digits,statement_timeout,search_path,options
+      VERBOSE: 0
+      LOG_CONNECTIONS: 0
+      LOG_DISCONNECTIONS: 0
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - ninelytics
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 6432 || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  dragonfly:
+    image: docker.dragonflydb.io/dragonflydb/dragonfly:latest
+    restart: unless-stopped
+    command: dragonfly --logtostderr --maxmemory 512mb --port 6379 --bind 0.0.0.0 --dir /data --proactor_threads 2
+    ulimits:
+      memlock: -1
+    volumes:
+      - dragonfly_data:/data
+    networks:
+      - ninelytics
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    # Or use pre-built image:
+    # image: ghcr.io/the9thave/ninelytics:latest
+    restart: unless-stopped
+    environment:
+      # ─── Core (auto-wired to pgbouncer + dragonfly) ───
+      DATABASE_URL: postgresql://${DB_USER:-postgres}:${DB_PASSWORD}@pgbouncer:6432/${DB_NAME:-ninelytics}
+      REDIS_URL: redis://dragonfly:6379
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:?Set NEXTAUTH_SECRET in .env}
+      NEXTAUTH_URL: ${APP_URL:-http://localhost:3000}
+      JWT_SECRET: ${JWT_SECRET:-${NEXTAUTH_SECRET}}
+      NEXT_PUBLIC_APP_URL: ${APP_URL:-http://localhost:3000}
+      # ─── AI Models (optional — at least one for AI Insights) ───
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      GOOGLE_AI_API_KEY: ${GOOGLE_AI_API_KEY:-}
+      # ─── Google OAuth (optional — for GA4 + Search Console) ───
+      GOOGLE_API_CLIENT_ID: ${GOOGLE_API_CLIENT_ID:-}
+      GOOGLE_API_CLIENT_SECRET: ${GOOGLE_API_CLIENT_SECRET:-}
+      # ─── GeoIP (optional — for visitor maps) ───
+      MAXMIND_LICENSE_KEY: ${MAXMIND_LICENSE_KEY:-}
+      MAXMIND_DB_PATH: /var/data/GeoLite2-City.mmdb
+      # ─── Uptime Notifications (optional) ───
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      RESEND_FROM_EMAIL: ${RESEND_FROM_EMAIL:-}
+      TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID:-}
+      TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN:-}
+      TWILIO_PHONE_NUMBER: ${TWILIO_PHONE_NUMBER:-}
+      # ─── Seed ───
+      SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL:-admin@localhost}
+      SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-admin}
+    ports:
+      - "${PORT:-3000}:3000"
+    depends_on:
+      pgbouncer:
+        condition: service_healthy
+      dragonfly:
+        condition: service_started
+    command: >
+      sh -c "
+        echo '── Pushing database schema...' &&
+        DATABASE_URL=postgresql://${DB_USER:-postgres}:${DB_PASSWORD}@postgres:5432/${DB_NAME:-ninelytics} npx drizzle-kit push --force &&
+        echo '── Starting Ninelytics...' &&
+        node server.js
+      "
+    networks:
+      - ninelytics
+
+volumes:
+  postgres_data:
+  dragonfly_data:
+
+networks:
+  ninelytics:
+    driver: bridge
