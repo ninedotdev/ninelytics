@@ -6,7 +6,6 @@
 
   if (!siteId || !endpoint) return;
 
-  // Google Core Web Vitals thresholds
   var THRESHOLDS = {
     LCP:  { good: 2500,  poor: 4000  },
     FCP:  { good: 1800,  poor: 3000  },
@@ -14,6 +13,9 @@
     CLS:  { good: 0.1,   poor: 0.25  },
     TTFB: { good: 800,   poor: 1800  },
   };
+
+  // Track which vitals have already been sent this page load — max 1 per metric
+  var sent = {};
 
   function getRating(name, value) {
     var t = THRESHOLDS[name];
@@ -36,7 +38,10 @@
   }
 
   function sendVital(name, value) {
-    // CLS stored as integer (multiply by 1000 to avoid float precision issues)
+    // Only send once per metric per page load
+    if (sent[name]) return;
+    sent[name] = true;
+
     var storedValue = Math.round(name === 'CLS' ? value * 1000 : value);
     var payload = JSON.stringify({
       siteId: siteId,
@@ -48,7 +53,6 @@
       connectionType: getConnectionType(),
     });
 
-    // Send as text/plain to avoid CORS preflight (simple request, no credentials issue)
     if (navigator.sendBeacon) {
       navigator.sendBeacon(endpoint + '/api/vitals', payload);
     } else {
@@ -61,15 +65,16 @@
     }
   }
 
-  // LCP — Largest Contentful Paint
+  // LCP — take the LAST entry (final LCP candidate) on page hide
+  var lcpValue = 0;
   try {
     new PerformanceObserver(function (list) {
-      var entry = list.getEntries().pop();
-      if (entry) sendVital('LCP', entry.startTime);
+      var entries = list.getEntries();
+      if (entries.length > 0) lcpValue = entries[entries.length - 1].startTime;
     }).observe({ type: 'largest-contentful-paint', buffered: true });
   } catch (e) {}
 
-  // FCP — First Contentful Paint
+  // FCP — first paint only
   try {
     new PerformanceObserver(function (list) {
       var entries = list.getEntries();
@@ -82,21 +87,20 @@
     }).observe({ type: 'paint', buffered: true });
   } catch (e) {}
 
-  // INP — Interaction to Next Paint
+  // INP — track worst interaction, send on page hide
+  var inpValue = 0;
   try {
     new PerformanceObserver(function (list) {
       var entries = list.getEntries();
-      var worst = 0;
       for (var i = 0; i < entries.length; i++) {
-        if (entries[i].duration > worst) worst = entries[i].duration;
+        if (entries[i].duration > inpValue) inpValue = entries[i].duration;
       }
-      if (worst > 0) sendVital('INP', worst);
-    }).observe({ type: 'event', buffered: true, durationThreshold: 16 });
+    }).observe({ type: 'event', buffered: true, durationThreshold: 40 });
   } catch (e) {}
 
-  // CLS — Cumulative Layout Shift (sent on page hide for accuracy)
+  // CLS — accumulate, send on page hide
+  var clsValue = 0;
   try {
-    var clsValue = 0;
     var clsObs = new PerformanceObserver(function (list) {
       var entries = list.getEntries();
       for (var i = 0; i < entries.length; i++) {
@@ -104,22 +108,33 @@
       }
     });
     clsObs.observe({ type: 'layout-shift', buffered: true });
-
-    document.addEventListener('visibilitychange', function () {
-      if (document.visibilityState === 'hidden') {
-        try { clsObs.takeRecords(); } catch (e) {}
-        if (clsValue > 0) sendVital('CLS', clsValue);
-      }
-    });
   } catch (e) {}
 
-  // TTFB — Time to First Byte
+  // TTFB — send immediately (only fires once)
   try {
     var navEntries = performance.getEntriesByType('navigation');
     if (navEntries.length > 0) {
       var nav = navEntries[0];
-      sendVital('TTFB', nav.responseStart - nav.requestStart);
+      var ttfb = nav.responseStart - nav.requestStart;
+      if (ttfb > 0) sendVital('TTFB', ttfb);
     }
   } catch (e) {}
+
+  // Send LCP, INP, CLS on page hide (most accurate moment)
+  function onPageHide() {
+    if (lcpValue > 0) sendVital('LCP', lcpValue);
+    if (inpValue > 0) sendVital('INP', inpValue);
+    if (clsValue > 0) sendVital('CLS', clsValue);
+  }
+
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'hidden') {
+      try { if (typeof clsObs !== 'undefined') clsObs.takeRecords(); } catch (e) {}
+      onPageHide();
+    }
+  });
+
+  // Fallback for browsers that don't fire visibilitychange reliably
+  window.addEventListener('pagehide', onPageHide);
 
 })();

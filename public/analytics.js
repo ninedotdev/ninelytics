@@ -746,36 +746,41 @@
 
   // Initialization
   // Load website configuration from server
+  // Returns false if site is inactive/not found (tracking should not start)
   async function loadWebsiteConfig() {
     try {
       var response = await fetch(CONFIG.API_BASE + '/api/websites/config/' + CONFIG.TRACKING_CODE);
-      if (response.ok) {
-        var config = await response.json();
-        state.excludedPaths = config.excludedPaths || [];
-        state.cookieConsent = config.cookieConsent || null;
-
-        // Speed Insights — lazy-load optional module
-        if (config.speedInsights) {
-          window.__SI_SITE = CONFIG.TRACKING_CODE;
-          window.__SI_EP = CONFIG.API_BASE;
-          var si = document.createElement('script');
-          si.src = CONFIG.API_BASE + '/speed-insights.js';
-          si.async = true;
-          document.head.appendChild(si);
-        }
-
-        // Load saved consent from localStorage
-        if (state.cookieConsent && state.cookieConsent.enabled) {
-          try {
-            var saved = localStorage.getItem('analytics_consent');
-            if (saved) {
-              state.consentGiven = JSON.parse(saved);
-            }
-          } catch (e) { /* ignore */ }
-        }
+      if (!response.ok) {
+        // Site not found or inactive — stop tracking entirely
+        return false;
       }
+      var config = await response.json();
+      state.excludedPaths = config.excludedPaths || [];
+      state.cookieConsent = config.cookieConsent || null;
+
+      // Speed Insights — lazy-load optional module
+      if (config.speedInsights) {
+        window.__SI_SITE = CONFIG.TRACKING_CODE;
+        window.__SI_EP = CONFIG.API_BASE;
+        var si = document.createElement('script');
+        si.src = CONFIG.API_BASE + '/speed-insights.js';
+        si.async = true;
+        document.head.appendChild(si);
+      }
+
+      // Load saved consent from localStorage
+      if (state.cookieConsent && state.cookieConsent.enabled) {
+        try {
+          var saved = localStorage.getItem('analytics_consent');
+          if (saved) {
+            state.consentGiven = JSON.parse(saved);
+          }
+        } catch (e) { /* ignore */ }
+      }
+      return true;
     } catch (error) {
-      // Silently fail
+      // Network error — silently fail, don't block
+      return true;
     }
   }
 
@@ -1003,7 +1008,8 @@
     (async () => {
       try {
         // Load website config (excluded paths + analytics consent)
-        await loadWebsiteConfig();
+        var siteActive = await loadWebsiteConfig();
+        if (!siteActive) return; // Site inactive or not found — don't track
 
         // If consent required and not given, show banner and wait
         if (state.cookieConsent && state.cookieConsent.enabled && !state.consentGiven) {

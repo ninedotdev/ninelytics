@@ -86,43 +86,49 @@ export async function upsertVisitor(
     updateSet.totalSessions = sql`${visitors.totalSessions} + 1`
   }
 
-  const [result] = await db
-    .insert(visitors)
-    .values({
-      websiteId: data.websiteId,
-      visitorId: data.visitorId,
-      ipAddress: data.ipAddress,
-      userAgent: data.userAgent,
-      browser: data.browser,
-      os: data.os,
-      device: data.device,
-      screenResolution: data.screenResolution,
-      viewport: data.viewport,
-      language: data.language,
-      timezone: data.timezone,
-      connection: data.connection,
-      pixelRatio: data.pixelRatio != null ? String(data.pixelRatio) : null,
-      cookieEnabled: data.cookieEnabled ?? null,
-      doNotTrack: data.doNotTrack ?? null,
-      country: data.country ?? null,
-      state: data.state ?? null,
-      city: data.city ?? null,
-      lat: data.lat != null ? String(data.lat) : null,
-      lon: data.lon != null ? String(data.lon) : null,
-      totalPageViews: incrementPageViews ? 1 : 0,
-      totalSessions: incrementSessions ? 1 : 0,
-      firstVisit: nowIso,
-      lastVisit: nowIso,
-      createdAt: nowIso,
-      updatedAt: nowIso,
-    } satisfies InferInsertModel<typeof visitors>)
-    .onConflictDoUpdate({
-      target: [visitors.websiteId, visitors.visitorId],
-      set: updateSet as Partial<InferInsertModel<typeof visitors>>,
-    })
-    .returning()
+  try {
+    const [result] = await db
+      .insert(visitors)
+      .values({
+        websiteId: data.websiteId,
+        visitorId: data.visitorId,
+        ipAddress: data.ipAddress,
+        userAgent: data.userAgent,
+        browser: data.browser,
+        os: data.os,
+        device: data.device,
+        screenResolution: data.screenResolution,
+        viewport: data.viewport,
+        language: data.language,
+        timezone: data.timezone,
+        connection: data.connection,
+        pixelRatio: data.pixelRatio != null ? String(data.pixelRatio) : null,
+        cookieEnabled: data.cookieEnabled ?? null,
+        doNotTrack: data.doNotTrack ?? null,
+        country: data.country ?? null,
+        state: data.state ?? null,
+        city: data.city ?? null,
+        lat: data.lat != null ? String(data.lat) : null,
+        lon: data.lon != null ? String(data.lon) : null,
+        totalPageViews: incrementPageViews ? 1 : 0,
+        totalSessions: incrementSessions ? 1 : 0,
+        firstVisit: nowIso,
+        lastVisit: nowIso,
+        createdAt: nowIso,
+        updatedAt: nowIso,
+      } satisfies InferInsertModel<typeof visitors>)
+      .onConflictDoUpdate({
+        target: [visitors.websiteId, visitors.visitorId],
+        set: updateSet as Partial<InferInsertModel<typeof visitors>>,
+      })
+      .returning()
 
-  return result
+    return result
+  } catch (e: unknown) {
+    // FK violation = website was deleted between check and insert — ignore
+    if (e instanceof Error && e.message.includes("foreign key constraint")) return null
+    throw e
+  }
 }
 
 export async function upsertSession(
@@ -156,35 +162,40 @@ export async function upsertSession(
     updateSet.pageViewCount = sql`${visitorSessions.pageViewCount} + 1`
   }
 
-  const [result] = await db
-    .insert(visitorSessions)
-    .values({
-      websiteId: data.websiteId,
-      visitorId: data.visitorId,
-      sessionId: data.sessionId,
-      referrer: data.referrer ?? null,
-      landingPage: data.landingPage ?? null,
-      utmSource: data.utmSource ?? null,
-      utmMedium: data.utmMedium ?? null,
-      utmCampaign: data.utmCampaign ?? null,
-      utmTerm: data.utmTerm ?? null,
-      utmContent: data.utmContent ?? null,
-      source: data.source ?? null,
-      medium: data.medium ?? null,
-      referrerDomain: data.referrerDomain ?? null,
-      isSearchEngine: data.isSearchEngine ?? null,
-      searchEngine: data.searchEngine ?? null,
-      socialNetwork: data.socialNetwork ?? null,
-      pageViewCount: incrementPageViews ? 1 : 0,
-      startTime: nowIso,
-      createdAt: nowIso,
-      updatedAt: nowIso,
-    } satisfies InferInsertModel<typeof visitorSessions>)
-    .onConflictDoUpdate({
-      target: [visitorSessions.websiteId, visitorSessions.sessionId],
-      set: updateSet as Partial<InferInsertModel<typeof visitorSessions>>,
-    })
-    .returning()
+  try {
+    const [result] = await db
+      .insert(visitorSessions)
+      .values({
+        websiteId: data.websiteId,
+        visitorId: data.visitorId,
+        sessionId: data.sessionId,
+        referrer: data.referrer ?? null,
+        landingPage: data.landingPage ?? null,
+        utmSource: data.utmSource ?? null,
+        utmMedium: data.utmMedium ?? null,
+        utmCampaign: data.utmCampaign ?? null,
+        utmTerm: data.utmTerm ?? null,
+        utmContent: data.utmContent ?? null,
+        source: data.source ?? null,
+        medium: data.medium ?? null,
+        referrerDomain: data.referrerDomain ?? null,
+        isSearchEngine: data.isSearchEngine ?? null,
+        searchEngine: data.searchEngine ?? null,
+        socialNetwork: data.socialNetwork ?? null,
+        pageViewCount: incrementPageViews ? 1 : 0,
+        startTime: nowIso,
+        createdAt: nowIso,
+        updatedAt: nowIso,
+      } satisfies InferInsertModel<typeof visitorSessions>)
+      .onConflictDoUpdate({
+        target: [visitorSessions.websiteId, visitorSessions.sessionId],
+        set: updateSet as Partial<InferInsertModel<typeof visitorSessions>>,
+      })
+      .returning()
 
-  return result
+    return result
+  } catch (e: unknown) {
+    if (e instanceof Error && e.message.includes("foreign key constraint")) return null
+    throw e
+  }
 }

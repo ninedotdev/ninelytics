@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/server/db/client'
 import { websites, webVitals } from '@/server/db/schema'
-import { eq } from 'drizzle-orm'
+import { eq, and } from 'drizzle-orm'
 
 function corsHeaders(request: NextRequest) {
   const origin = request.headers.get('origin') ?? '*'
@@ -44,11 +44,17 @@ export async function POST(request: NextRequest) {
     const [website] = await db
       .select({ id: websites.id, speedInsightsEnabled: websites.speedInsightsEnabled })
       .from(websites)
-      .where(eq(websites.trackingCode, String(siteId)))
+      .where(and(eq(websites.trackingCode, String(siteId)), eq(websites.status, 'ACTIVE')))
       .limit(1)
 
     if (!website?.speedInsightsEnabled) {
       return new NextResponse(null, { status: 404, headers })
+    }
+
+    // Server-side sampling: accept ~10% of vitals to prevent DB bloat
+    // Deterministic based on value to avoid bias
+    if (Math.round(Number(value)) % 10 !== 0) {
+      return new NextResponse(null, { status: 202, headers })
     }
 
     await db.insert(webVitals).values({

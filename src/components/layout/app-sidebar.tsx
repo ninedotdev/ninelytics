@@ -18,6 +18,7 @@ import {
   IconShieldCheck,
   IconFilter,
   IconGauge,
+  IconWorldSearch,
 } from "@tabler/icons-react";
 import { useSession, signOut } from "next-auth/react";
 import { usePathname, useRouter } from "next/navigation";
@@ -64,6 +65,7 @@ function getNavigationItems(session: { user: { role: string; isSuperAdmin: boole
     { title: "Real-time", url: "/realtime", icon: IconActivity },
     { title: "Goals", url: "/goals", icon: IconTarget },
     { title: "Funnels", url: "/analytics?tab=funnels", icon: IconFilter },
+    { title: "Search Console", url: "/search-console", icon: IconWorldSearch },
     { title: "Speed Insights", url: "/speed-insights", icon: IconGauge },
     { title: "AI Insights", url: "/ai", icon: IconSparkles },
     { title: "Reports", url: "/reports", icon: IconFileText },

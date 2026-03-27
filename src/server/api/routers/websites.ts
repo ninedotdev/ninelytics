@@ -1,6 +1,6 @@
 import { nanoid } from "nanoid"
 import { z } from "zod"
-import { and, desc, eq, inArray, or, sql, isNotNull } from "drizzle-orm"
+import { and, desc, eq, inArray, or, sql, isNotNull, lt } from "drizzle-orm"
 import {
   userWebsiteAccess,
   users,
@@ -11,6 +11,8 @@ import {
   events,
   conversions,
   performanceMetrics,
+  webVitals,
+  searchConsoleData,
 } from "@/server/db/schema"
 import { protectedProcedure, publicProcedure, router } from "../trpc"
 import { safeTimezone } from "@/lib/timezone"
@@ -204,14 +206,14 @@ export const websitesRouter = router({
       const userId = ctx.session!.user.id
       const tz = safeTimezone(input?.timezone)
       const page = input?.page && input.page > 0 ? input.page : 1
-      const pageSize = input?.pageSize && input.pageSize > 0 ? Math.min(input.pageSize, 50) : 12
+      const pageSize = input?.pageSize && input.pageSize > 0 ? Math.min(input.pageSize, 100) : 50
       const offset = (page - 1) * pageSize
 
       // Total count of accessible websites
       const totalResult = await ctx.db.execute<{ total: number }>(sql`
         SELECT COUNT(*)::int as total
         FROM websites w
-        WHERE w.status != 'INACTIVE'
+        WHERE w.status != 'PENDING'
           AND (
             w.owner_id = ${userId}
             OR EXISTS (
@@ -225,9 +227,10 @@ export const websitesRouter = router({
 
       const rows = await ctx.db.execute(sql`
         WITH accessible AS (
-          SELECT w.*
+          SELECT w.*, u.name as owner_name, u.email as owner_email
           FROM websites w
-          WHERE w.status != 'INACTIVE'
+          LEFT JOIN users u ON u.id = w.owner_id
+          WHERE w.status != 'PENDING'
             AND (
               w.owner_id = ${userId}
               OR EXISTS (
@@ -238,40 +241,27 @@ export const websitesRouter = router({
             )
           ORDER BY w.created_at DESC
           LIMIT ${pageSize} OFFSET ${offset}
-        ),
-        agg AS (
-          SELECT
-            w.id,
-            w.name,
-            w.url,
-            w.description,
-            w.status,
-            w.tracking_code,
-            w.created_at,
-            w.updated_at,
-            w.owner_id,
-            w.cloudflare_zone_id,
-            w.cloudflare_synced_at,
-            w.google_analytics_property_id,
-            w.google_analytics_synced_at,
-            (SELECT u.name FROM users u WHERE u.id = w.owner_id) as owner_name,
-            (SELECT u.email FROM users u WHERE u.id = w.owner_id) as owner_email,
-            (SELECT COUNT(*) FROM page_views pv WHERE pv.website_id = w.id AND pv.timestamp >= NOW() - INTERVAL '7 days') as views_last_7_days,
-            (SELECT COUNT(DISTINCT pv2.visitor_id) FROM page_views pv2 WHERE pv2.website_id = w.id AND (pv2.timestamp AT TIME ZONE 'UTC' AT TIME ZONE ${tz})::date = (NOW() AT TIME ZONE ${tz})::date) as visitors_today,
-            (SELECT COUNT(DISTINCT pv4.visitor_id) FROM page_views pv4 WHERE pv4.website_id = w.id AND (pv4.timestamp AT TIME ZONE 'UTC' AT TIME ZONE ${tz})::date = (NOW() AT TIME ZONE ${tz})::date - 1) as visitors_yesterday,
-            (SELECT COUNT(DISTINCT DATE(pv.timestamp)) FROM page_views pv WHERE pv.website_id = w.id) as total_analytics_data,
-            (SELECT json_agg(row_to_json(d)) FROM (
-              SELECT to_char((pv3.timestamp AT TIME ZONE 'UTC' AT TIME ZONE ${tz})::date, 'YYYY-MM-DD') as date, COUNT(*)::int as views
-              FROM page_views pv3
-              WHERE pv3.website_id = w.id
-                AND pv3.timestamp >= NOW() - INTERVAL '7 days'
-              GROUP BY 1
-              ORDER BY 1
-            ) d) as last7days
-          FROM accessible w
         )
-        SELECT * FROM agg
-        ORDER BY created_at DESC
+        SELECT
+          w.id, w.name, w.url, w.description, w.status, w.tracking_code,
+          w.created_at, w.updated_at, w.owner_id,
+          w.cloudflare_zone_id, w.cloudflare_synced_at,
+          w.google_analytics_property_id, w.google_analytics_synced_at,
+          w.owner_name, w.owner_email,
+          (SELECT COUNT(*) FROM page_views pv WHERE pv.website_id = w.id AND pv.timestamp >= NOW() - INTERVAL '7 days') as views_last_7_days,
+          (SELECT COUNT(DISTINCT pv2.visitor_id) FROM page_views pv2 WHERE pv2.website_id = w.id AND pv2.timestamp >= (NOW() AT TIME ZONE ${tz})::date AT TIME ZONE ${tz}) as visitors_today,
+          (SELECT COUNT(DISTINCT pv4.visitor_id) FROM page_views pv4 WHERE pv4.website_id = w.id AND pv4.timestamp >= ((NOW() AT TIME ZONE ${tz})::date - 1) AT TIME ZONE ${tz} AND pv4.timestamp < (NOW() AT TIME ZONE ${tz})::date AT TIME ZONE ${tz}) as visitors_yesterday,
+          COALESCE(EXTRACT(DAY FROM NOW() - (SELECT MIN(pv5.timestamp) FROM page_views pv5 WHERE pv5.website_id = w.id))::int, 0) as total_analytics_data,
+          (SELECT json_agg(row_to_json(d)) FROM (
+            SELECT to_char((pv3.timestamp AT TIME ZONE 'UTC' AT TIME ZONE ${tz})::date, 'YYYY-MM-DD') as date, COUNT(*)::int as views
+            FROM page_views pv3
+            WHERE pv3.website_id = w.id
+              AND pv3.timestamp >= NOW() - INTERVAL '7 days'
+            GROUP BY 1
+            ORDER BY 1
+          ) d) as last7days
+        FROM accessible w
+        ORDER BY w.created_at DESC
       `)
 
       // Build a full 7-day date array (today and 6 days back) for zero-filling
@@ -432,26 +422,28 @@ export const websitesRouter = router({
 
       const totalRecords = recordCounts.reduce((sum, result) => sum + Number(result[0]?.count ?? 0), 0)
 
-      // If website has many records, use soft delete
-      if (totalRecords > 100000) {
-        await ctx.db
-          .update(websites)
-          .set({ status: "INACTIVE" })
-          .where(eq(websites.id, id))
+      // Always soft-delete first (mark INACTIVE), then delete data in background
+      // This prevents accidental permanent deletion and lets the user recover
+      await ctx.db
+        .update(websites)
+        .set({ status: "INACTIVE" })
+        .where(eq(websites.id, id))
+
+      // For small datasets, also hard-delete immediately
+      if (totalRecords <= 100000) {
+        await ctx.db.delete(websites).where(eq(websites.id, id))
         return {
           success: true,
-          message: "Website marked as inactive",
-          method: "soft_delete",
+          message: "Website deleted successfully",
+          method: "direct_delete",
           totalRecords,
         }
       }
 
-      // For smaller datasets, delete directly (cascade will handle related records)
-      await ctx.db.delete(websites).where(eq(websites.id, id))
       return {
         success: true,
-        message: "Website deleted successfully",
-        method: "direct_delete",
+        message: "Website marked for deletion",
+        method: "soft_delete",
         totalRecords,
       }
     }),
@@ -855,6 +847,71 @@ export const websitesRouter = router({
           lastActivity: lastActivity?.timestamp || null,
         },
       }
+    }),
+
+  cleanupData: protectedProcedure
+    .input(z.object({
+      websiteId: z.string(),
+      olderThanDays: z.number().min(0).max(365),
+      tables: z.array(z.enum(["pageViews", "events", "visitors", "sessions", "webVitals", "searchConsole", "performance"])).min(1),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const userId = ctx.session!.user.id
+      // Verify ownership (not just access)
+      const [website] = await ctx.db
+        .select({ ownerId: websites.ownerId })
+        .from(websites)
+        .where(eq(websites.id, input.websiteId))
+        .limit(1)
+      if (!website || website.ownerId !== userId) {
+        throw new Error("Only the website owner can delete data")
+      }
+
+      const deleteAll = input.olderThanDays === 0
+      const cutoff = deleteAll ? "" : new Date(Date.now() - input.olderThanDays * 86400000).toISOString()
+      const results: Record<string, number> = {}
+
+      const deleteAndCount = async (tableName: string, websiteCol: string, timeCol: string, isDate = false) => {
+        let query: string
+        if (deleteAll) {
+          query = `WITH deleted AS (DELETE FROM ${tableName} WHERE ${websiteCol} = '${input.websiteId}' RETURNING 1) SELECT count(*) as cnt FROM deleted`
+        } else {
+          const timeCondition = isDate
+            ? `${timeCol}::timestamp < '${cutoff}'::timestamp`
+            : `${timeCol} < '${cutoff}'`
+          query = `WITH deleted AS (DELETE FROM ${tableName} WHERE ${websiteCol} = '${input.websiteId}' AND ${timeCondition} RETURNING 1) SELECT count(*) as cnt FROM deleted`
+        }
+        const result = await ctx.db.execute(sql.raw(query))
+        return Number((result as unknown as Array<{ cnt: string }>)[0]?.cnt ?? 0)
+      }
+
+      for (const table of input.tables) {
+        switch (table) {
+          case "pageViews":
+            results[table] = await deleteAndCount("page_views", "website_id", "timestamp")
+            break
+          case "events":
+            results[table] = await deleteAndCount("events", "website_id", "timestamp")
+            break
+          case "visitors":
+            results[table] = await deleteAndCount("visitors", "website_id", "created_at")
+            break
+          case "sessions":
+            results[table] = await deleteAndCount("visitor_sessions", "website_id", "created_at")
+            break
+          case "webVitals":
+            results[table] = await deleteAndCount("web_vitals", "website_id", "recorded_at")
+            break
+          case "searchConsole":
+            results[table] = await deleteAndCount("search_console_data", "website_id", "record_date", true)
+            break
+          case "performance":
+            results[table] = await deleteAndCount("performance_metrics", "website_id", "timestamp")
+            break
+        }
+      }
+
+      return { success: true, deleted: results }
     }),
 })
 

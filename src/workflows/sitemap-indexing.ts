@@ -113,24 +113,39 @@ async function submitToIndexNow(websiteId: string, urls: string[], indexNowKey: 
   const { and, eq, inArray } = await import("drizzle-orm")
 
   const host = new URL(domain.startsWith("http") ? domain : `https://${domain}`).hostname
-  console.log(`[sitemap] Submitting ${urls.length} URLs to IndexNow for ${host}`)
 
-  const res = await fetch("https://api.indexnow.org/indexnow", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      host,
-      key: indexNowKey,
-      keyLocation: `https://${host}/${indexNowKey}.txt`,
-      urlList: urls.slice(0, 10000),
-    }),
+  // Filter: only URLs belonging to this host
+  const validUrls = urls.filter((u) => {
+    try { return new URL(u).hostname.replace("www.", "") === host.replace("www.", "") } catch { return false }
   })
 
-  if (!res.ok && res.status !== 202) {
-    throw new Error(`IndexNow failed: ${res.status}`)
-  }
+  if (validUrls.length === 0) return
 
-  console.log(`[sitemap] IndexNow response: ${res.status}`)
+  console.log(`[sitemap] Submitting ${validUrls.length} URLs to IndexNow for ${host}`)
+
+  // Submit in batches of 100 to avoid 422 errors
+  const BATCH = 100
+  for (let i = 0; i < validUrls.length; i += BATCH) {
+    const batch = validUrls.slice(i, i + BATCH)
+    const res = await fetch("https://api.indexnow.org/indexnow", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        host,
+        key: indexNowKey,
+        keyLocation: `https://${host}/${indexNowKey}.txt`,
+        urlList: batch,
+      }),
+    })
+
+    if (!res.ok && res.status !== 202) {
+      const body = await res.text().catch(() => "")
+      console.warn(`[sitemap] IndexNow batch error (${res.status}): ${body}`)
+      // Don't throw — IndexNow failures are non-critical
+    } else {
+      console.log(`[sitemap] IndexNow batch ${i / BATCH + 1}: ${res.status} (${batch.length} URLs)`)
+    }
+  }
 
   await db.update(sitemapUrls)
     .set({ indexNowSubmittedAt: new Date().toISOString() })

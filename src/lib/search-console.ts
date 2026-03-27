@@ -204,3 +204,56 @@ export async function fetchSearchConsoleAggregates(
     avgPosition: row?.position ?? 0,
   }
 }
+
+/**
+ * Fetch daily totals (dimension: date only — no query/page filtering).
+ * These numbers match the Google Search Console dashboard exactly.
+ */
+export async function fetchSearchConsoleDailyTotals(
+  siteUrl: string,
+  accessToken: string,
+  startDate: string,
+  endDate: string
+): Promise<Array<{ date: string; clicks: number; impressions: number; ctr: number; position: number }>> {
+  const res = await fetch(
+    `${SC_API_BASE}/sites/${encodeURIComponent(siteUrl)}/searchAnalytics/query`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        startDate,
+        endDate,
+        dimensions: ["date"], // Only date — no query/page = accurate totals
+        rowLimit: 25000,
+      }),
+    }
+  )
+
+  if (!res.ok) {
+    const body = await res.text()
+    throw new Error(`Search Console daily totals error: ${res.status} — ${body}`)
+  }
+
+  const data = (await res.json()) as {
+    rows?: Array<{
+      keys: string[]
+      clicks: number
+      impressions: number
+      ctr: number
+      position: number
+    }>
+  }
+
+  return (data.rows ?? [])
+    .map((row) => ({
+      date: row.keys[0]!,
+      clicks: row.clicks,
+      impressions: row.impressions,
+      ctr: row.ctr,
+      position: row.position,
+    }))
+    .sort((a, b) => a.date.localeCompare(b.date))
+}

@@ -317,7 +317,7 @@ export const websites = pgTable(
 export const uptimeChecks = pgTable(
   "uptime_checks",
   {
-    id: text("id").primaryKey().default(sql`gen_random_uuid()`),
+    id: text("id").notNull().default(sql`gen_random_uuid()`),
     websiteId: text("website_id")
       .notNull()
       .references(() => websites.id, { onDelete: "cascade" }),
@@ -329,6 +329,7 @@ export const uptimeChecks = pgTable(
     checkedAt: timestamp("checked_at", { mode: "string" }).defaultNow().notNull(),
   },
   (table) => ({
+    pk: primaryKey({ columns: [table.id, table.checkedAt] }),
     websiteCheckedAtIdx: index("uptime_checks_website_checked_at_idx").on(table.websiteId, table.checkedAt),
   })
 )
@@ -454,7 +455,7 @@ export const visitorSessions = pgTable(
 )
 
 export const pageViews = pgTable("page_views", {
-  id: text("id").primaryKey().default(sql`gen_random_uuid()`),
+  id: text("id").notNull().default(sql`gen_random_uuid()`),
   websiteId: text("website_id")
     .notNull()
     .references(() => websites.id, { onDelete: "cascade" }),
@@ -467,13 +468,14 @@ export const pageViews = pgTable("page_views", {
   timestamp: timestamp("timestamp", { mode: "string" }).defaultNow().notNull(),
   createdAt: timestamp("created_at", { mode: "string" }).defaultNow().notNull(),
 }, (table) => ({
+  pk: primaryKey({ columns: [table.id, table.timestamp] }),
   idxWebsiteTimestamp: index("page_views_website_id_timestamp_idx").on(table.websiteId, table.timestamp),
   idxWebsiteVisitorId: index("page_views_website_id_visitor_id_idx").on(table.websiteId, table.visitorId),
   idxWebsiteSessionId: index("page_views_website_id_session_id_idx").on(table.websiteId, table.sessionId),
 }))
 
 export const events = pgTable("events", {
-  id: text("id").primaryKey().default(sql`gen_random_uuid()`),
+  id: text("id").notNull().default(sql`gen_random_uuid()`),
   websiteId: text("website_id")
     .notNull()
     .references(() => websites.id, { onDelete: "cascade" }),
@@ -486,6 +488,7 @@ export const events = pgTable("events", {
   timestamp: timestamp("timestamp", { mode: "string" }).defaultNow().notNull(),
   createdAt: timestamp("created_at", { mode: "string" }).defaultNow().notNull(),
 }, (table) => ({
+  pk: primaryKey({ columns: [table.id, table.timestamp] }),
   idxWebsiteTimestamp: index("events_website_id_timestamp_idx").on(table.websiteId, table.timestamp),
   idxWebsiteEventName: index("events_website_id_event_name_idx").on(table.websiteId, table.eventName),
   idxWebsiteVisitorId: index("events_website_id_visitor_id_idx").on(table.websiteId, table.visitorId),
@@ -688,7 +691,7 @@ export const sitemapUrls = pgTable(
 export const webVitals = pgTable(
   "web_vitals",
   {
-    id: text("id").primaryKey().default(sql`gen_random_uuid()`),
+    id: text("id").notNull().default(sql`gen_random_uuid()`),
     websiteId: text("website_id")
       .notNull()
       .references(() => websites.id, { onDelete: "cascade" }),
@@ -701,6 +704,7 @@ export const webVitals = pgTable(
     recordedAt: timestamp("recorded_at", { mode: "string" }).defaultNow().notNull(),
   },
   (table) => ({
+    pk: primaryKey({ columns: [table.id, table.recordedAt] }),
     websiteRecordedIdx: index("web_vitals_website_recorded_idx").on(table.websiteId, table.recordedAt),
     websiteNameIdx: index("web_vitals_website_name_idx").on(table.websiteId, table.name, table.recordedAt),
   })

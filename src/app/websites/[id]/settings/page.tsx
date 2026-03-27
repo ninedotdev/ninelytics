@@ -88,6 +88,136 @@ type Website = {
   } | null;
 };
 
+function DataCleanupCard({ websiteId }: { websiteId: string }) {
+  const [period, setPeriod] = useState("30");
+  const [selectedTables, setSelectedTables] = useState<string[]>(["webVitals"]);
+  const [cleaning, setCleaning] = useState(false);
+
+  const allTables = [
+    { id: "pageViews", label: "Page Views" },
+    { id: "events", label: "Events" },
+    { id: "visitors", label: "Visitors" },
+    { id: "sessions", label: "Sessions" },
+    { id: "webVitals", label: "Web Vitals" },
+    { id: "searchConsole", label: "Search Console" },
+    { id: "performance", label: "Performance Metrics" },
+  ];
+
+  const cleanup = api.websites.cleanupData.useMutation({
+    onSuccess(data) {
+      const total = Object.values(data.deleted).reduce((s, n) => s + n, 0);
+      sileo.success({ title: `Cleaned up ${total.toLocaleString()} records` });
+      setCleaning(false);
+    },
+    onError(error) {
+      sileo.error({ title: error.message || "Cleanup failed" });
+      setCleaning(false);
+    },
+  });
+
+  const toggleTable = (id: string) => {
+    setSelectedTables((prev) =>
+      prev.includes(id) ? prev.filter((t) => t !== id) : [...prev, id]
+    );
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-sm font-medium">Data Cleanup</CardTitle>
+        <CardDescription>Delete old analytics data to free up storage</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="space-y-2">
+          <Label>Keep only the last</Label>
+          <select
+            value={period}
+            onChange={(e) => setPeriod(e.target.value)}
+            className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          >
+            <option value="7">7 days</option>
+            <option value="14">14 days</option>
+            <option value="30">30 days</option>
+            <option value="60">60 days</option>
+            <option value="90">90 days</option>
+            <option value="180">6 months</option>
+            <option value="365">1 year</option>
+            <option value="0">Delete everything</option>
+          </select>
+        </div>
+
+        <div className="space-y-2">
+          <Label>Tables to clean</Label>
+          <div className="grid grid-cols-2 gap-2">
+            {allTables.map((t) => (
+              <label key={t.id} className="flex items-center gap-2 text-sm cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={selectedTables.includes(t.id)}
+                  onChange={() => toggleTable(t.id)}
+                  className="rounded border-input"
+                />
+                {t.label}
+              </label>
+            ))}
+          </div>
+        </div>
+
+        {period === "0" ? (
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button variant="destructive" disabled={cleaning || selectedTables.length === 0}>
+                {cleaning ? <><Spinner size={14} className="mr-1.5" /> Deleting...</> : <><IconAlertTriangle size={14} className="mr-1.5" /> Delete All Data</>}
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Delete all data?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  This will permanently delete <strong>all</strong> data for the selected tables. This action cannot be undone.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction
+                  variant="destructive"
+                  onClick={() => {
+                    setCleaning(true);
+                    cleanup.mutate({
+                      websiteId,
+                      olderThanDays: 0,
+                      tables: selectedTables as ("pageViews" | "events" | "visitors" | "sessions" | "webVitals" | "searchConsole" | "performance")[],
+                    });
+                  }}
+                >
+                  Delete everything
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        ) : (
+          <Button
+            variant="outline"
+            onClick={() => {
+              if (selectedTables.length === 0) return;
+              setCleaning(true);
+              cleanup.mutate({
+                websiteId,
+                olderThanDays: parseInt(period),
+                tables: selectedTables as ("pageViews" | "events" | "visitors" | "sessions" | "webVitals" | "searchConsole" | "performance")[],
+              });
+            }}
+            disabled={cleaning || selectedTables.length === 0}
+          >
+            {cleaning ? <><Spinner size={14} className="mr-1.5" /> Cleaning...</> : <><IconAlertTriangle size={14} className="mr-1.5" /> Clean Selected Data</>}
+          </Button>
+        )}
+        <p className="text-xs text-muted-foreground">This permanently deletes the selected data. Cannot be undone.</p>
+      </CardContent>
+    </Card>
+  );
+}
+
 function NotificationPrefsCard() {
   const [prefsSaving, setPrefsSaving] = useState(false);
 
@@ -1076,6 +1206,9 @@ export default function WebsiteSettingsPage() {
               </div>
             </CardContent>
           </Card>
+
+          {/* Data Cleanup */}
+          <DataCleanupCard websiteId={websiteId} />
 
           {/* Danger Zone */}
           <Card className="border-red-200 dark:border-red-900">

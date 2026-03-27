@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/server/db/client';
 import { websites } from '@/server/db/schema';
-import { eq } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -23,7 +23,7 @@ export async function GET(
         speedInsightsEnabled: websites.speedInsightsEnabled,
       })
       .from(websites)
-      .where(eq(websites.trackingCode, trackingCode))
+      .where(and(eq(websites.trackingCode, trackingCode), eq(websites.status, 'ACTIVE')))
       .limit(1);
 
     if (websiteRows.length === 0) {

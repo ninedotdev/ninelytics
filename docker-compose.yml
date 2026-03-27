@@ -6,6 +6,7 @@ services:
       POSTGRES_DB: ${DB_NAME:-ninelytics}
       POSTGRES_USER: ${DB_USER:-postgres}
       POSTGRES_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
+    command: ["postgres", "-c", "shared_preload_libraries=timescaledb"]
     volumes:
       - postgres_data:/var/lib/postgresql/data
     networks:
@@ -100,23 +101,7 @@ services:
         condition: service_healthy
       dragonfly:
         condition: service_started
-    command: >
-      sh -c "
-        echo '── Enabling TimescaleDB extension...' &&
-        PGPASSWORD=${DB_PASSWORD} psql -h postgres -U ${DB_USER:-postgres} -d ${DB_NAME:-ninelytics} -c 'CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;' 2>/dev/null || true &&
-        echo '── Pushing database schema...' &&
-        DATABASE_URL=postgresql://${DB_USER:-postgres}:${DB_PASSWORD}@postgres:5432/${DB_NAME:-ninelytics} npx drizzle-kit push --force &&
-        echo '── Creating hypertables...' &&
-        PGPASSWORD=${DB_PASSWORD} psql -h postgres -U ${DB_USER:-postgres} -d ${DB_NAME:-ninelytics} -c \"
-          SELECT create_hypertable('page_views', 'timestamp', if_not_exists => TRUE, migrate_data => TRUE);
-          SELECT create_hypertable('events', 'timestamp', if_not_exists => TRUE, migrate_data => TRUE);
-          SELECT create_hypertable('visitor_sessions', 'created_at', if_not_exists => TRUE, migrate_data => TRUE);
-          SELECT create_hypertable('uptime_checks', 'checked_at', if_not_exists => TRUE, migrate_data => TRUE);
-          SELECT create_hypertable('web_vitals', 'recorded_at', if_not_exists => TRUE, migrate_data => TRUE);
-        \" 2>/dev/null || true &&
-        echo '── Starting Ninelytics...' &&
-        node server.js
-      "
+    command: ["sh", "/app/docker-entrypoint.sh"]
     networks:
       - ninelytics
 
