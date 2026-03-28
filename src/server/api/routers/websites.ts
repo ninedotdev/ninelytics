@@ -15,7 +15,7 @@ import {
   searchConsoleData,
 } from "@/server/db/schema"
 import { protectedProcedure, publicProcedure, router } from "../trpc"
-import { safeTimezone } from "@/lib/timezone"
+import { safeTimezone, tzDate } from "@/lib/timezone"
 
 const paginationSchema = z.object({
   page: z.number().int().min(1).optional(),
@@ -249,8 +249,8 @@ export const websitesRouter = router({
           w.google_analytics_property_id, w.google_analytics_synced_at,
           w.owner_name, w.owner_email,
           (SELECT COUNT(*) FROM page_views pv WHERE pv.website_id = w.id AND pv.timestamp >= NOW() - INTERVAL '7 days') as views_last_7_days,
-          (SELECT COUNT(DISTINCT pv2.visitor_id) FROM page_views pv2 WHERE pv2.website_id = w.id AND pv2.timestamp >= (NOW() AT TIME ZONE ${tz})::date AT TIME ZONE ${tz}) as visitors_today,
-          (SELECT COUNT(DISTINCT pv4.visitor_id) FROM page_views pv4 WHERE pv4.website_id = w.id AND pv4.timestamp >= ((NOW() AT TIME ZONE ${tz})::date - 1) AT TIME ZONE ${tz} AND pv4.timestamp < (NOW() AT TIME ZONE ${tz})::date AT TIME ZONE ${tz}) as visitors_yesterday,
+          (SELECT COUNT(DISTINCT pv2.visitor_id) FROM page_views pv2 WHERE pv2.website_id = w.id AND pv2.timestamp >= ((NOW() AT TIME ZONE ${tz})::date)::timestamp AT TIME ZONE ${tz}) as visitors_today,
+          (SELECT COUNT(DISTINCT pv4.visitor_id) FROM page_views pv4 WHERE pv4.website_id = w.id AND pv4.timestamp >= (((NOW() AT TIME ZONE ${tz})::date - 1)::timestamp AT TIME ZONE ${tz}) AND pv4.timestamp < (((NOW() AT TIME ZONE ${tz})::date)::timestamp AT TIME ZONE ${tz})) as visitors_yesterday,
           COALESCE(EXTRACT(DAY FROM NOW() - (SELECT MIN(pv5.timestamp) FROM page_views pv5 WHERE pv5.website_id = w.id))::int, 0) as total_analytics_data,
           (SELECT json_agg(row_to_json(d)) FROM (
             SELECT to_char((pv3.timestamp AT TIME ZONE 'UTC' AT TIME ZONE ${tz})::date, 'YYYY-MM-DD') as date, COUNT(*)::int as views
@@ -531,13 +531,13 @@ export const websitesRouter = router({
       }
 
       const periodDays = period === "1d" ? 1 : period === "7d" ? 7 : period === "30d" ? 30 : 90
-      const periodStart = new Date()
-      if (period === "1d") {
-        periodStart.setUTCHours(0, 0, 0, 0)
-      } else {
-        periodStart.setDate(periodStart.getDate() - periodDays)
-        periodStart.setUTCHours(0, 0, 0, 0)
-      }
+      const daysBack = period === "1d" ? 0 : periodDays
+
+      // Compute period start as midnight in the user's timezone (via DB for accuracy)
+      const [{ ts: periodStartIso }] = await ctx.db.execute<{ ts: string }>(
+        sql`SELECT (((NOW() AT TIME ZONE ${tz})::date) - ${daysBack}::int)::timestamp AT TIME ZONE ${tz} AS ts`
+      )
+      const periodStart = new Date(periodStartIso)
       // keep alias for compat
       const last30Days = periodStart
 
@@ -571,9 +571,10 @@ export const websitesRouter = router({
       const chartDays = periodDays
 
       // Always keep 28-day window for the prediction chart (not affected by period selector)
-      const last28Start = new Date()
-      last28Start.setUTCDate(last28Start.getUTCDate() - 27)
-      last28Start.setUTCHours(0, 0, 0, 0)
+      const [{ ts: last28Iso }] = await ctx.db.execute<{ ts: string }>(
+        sql`SELECT (((NOW() AT TIME ZONE ${tz})::date) - 27)::timestamp AT TIME ZONE ${tz} AS ts`
+      )
+      const last28Start = new Date(last28Iso)
 
       const emptyStats = {
         period,
@@ -596,14 +597,14 @@ export const websitesRouter = router({
           deviceBreakdown: [] as { device: string; count: number }[],
           osBreakdown: [] as { os: string; count: number }[],
           chartData: Array.from({ length: chartDays }, (_, i) => {
-            const d = new Date(chartStart)
-            d.setUTCDate(d.getUTCDate() + i)
-            return { date: d.toISOString().slice(0, 10), views: 0 }
+            const d = new Date(periodStart)
+            d.setDate(d.getDate() + i)
+            return { date: d.toLocaleDateString('en-CA', { timeZone: tz }), views: 0 }
           }),
           last28Days: Array.from({ length: 28 }, (_, i) => {
             const d = new Date(last28Start)
-            d.setUTCDate(d.getUTCDate() + i)
-            return { date: d.toISOString().slice(0, 10), views: 0, visitors: 0 }
+            d.setDate(d.getDate() + i)
+            return { date: d.toLocaleDateString('en-CA', { timeZone: tz }), views: 0, visitors: 0 }
           }),
           lastActivity: null as string | null,
         },
@@ -656,11 +657,11 @@ export const websitesRouter = router({
           .from(pageViews).where(and(eq(pageViews.websiteId, id), sql`${pageViews.timestamp} >= ${last30Days.toISOString()}`)),
         ctx.db.select({ count: sql<number>`count(*)` })
           .from(pageViews).where(and(eq(pageViews.websiteId, id), sql`${pageViews.timestamp} >= ${last30Days.toISOString()}`)),
-        // Today stats
+        // Today stats — use range scan for index efficiency
         ctx.db.select({ count: sql<number>`count(DISTINCT ${pageViews.visitorId})` })
-          .from(pageViews).where(and(eq(pageViews.websiteId, id), sql`(${pageViews.timestamp} AT TIME ZONE 'UTC' AT TIME ZONE ${tz})::date = (NOW() AT TIME ZONE ${tz})::date`)),
+          .from(pageViews).where(and(eq(pageViews.websiteId, id), sql`${pageViews.timestamp} >= ((NOW() AT TIME ZONE ${tz})::date)::timestamp AT TIME ZONE ${tz}`)),
         ctx.db.select({ count: sql<number>`count(*)` })
-          .from(pageViews).where(and(eq(pageViews.websiteId, id), sql`(${pageViews.timestamp} AT TIME ZONE 'UTC' AT TIME ZONE ${tz})::date = (NOW() AT TIME ZONE ${tz})::date`)),
+          .from(pageViews).where(and(eq(pageViews.websiteId, id), sql`${pageViews.timestamp} >= ((NOW() AT TIME ZONE ${tz})::date)::timestamp AT TIME ZONE ${tz}`)),
         // Session stats
         ctx.db.select({
           totalSessions: sql<number>`count(*)`,
@@ -710,18 +711,18 @@ export const websitesRouter = router({
         ctx.db.select({ source: visitorSessions.utmSource, count: sql<number>`count(DISTINCT ${visitorSessions.sessionId})` })
           .from(visitorSessions).where(and(eq(visitorSessions.websiteId, id), isNotNull(visitorSessions.utmSource), sql`${visitorSessions.startTime} >= ${last30Days.toISOString()}`))
           .groupBy(visitorSessions.utmSource).orderBy(desc(sql<number>`count(*)`)).limit(5),
-        // Chart data (period-aware, daily grouping)
-        ctx.db.select({ day: sql<string>`DATE_TRUNC('day', ${pageViews.timestamp})::date::text`, views: sql<number>`count(*)` })
+        // Chart data (period-aware, daily grouping in user's timezone)
+        ctx.db.select({ day: sql<string>`${sql.raw(tzDate('"page_views"."timestamp"', tz))}::text`, views: sql<number>`count(*)` })
           .from(pageViews).where(and(eq(pageViews.websiteId, id), sql`${pageViews.timestamp} >= ${chartStart.toISOString()}`))
-          .groupBy(sql`DATE_TRUNC('day', ${pageViews.timestamp})`).orderBy(sql`DATE_TRUNC('day', ${pageViews.timestamp})`),
+          .groupBy(sql.raw(tzDate('"page_views"."timestamp"', tz))).orderBy(sql.raw(tzDate('"page_views"."timestamp"', tz))),
         // Last 28 days views
-        ctx.db.select({ day: sql<string>`DATE_TRUNC('day', ${pageViews.timestamp})::date::text`, views: sql<number>`count(*)` })
+        ctx.db.select({ day: sql<string>`${sql.raw(tzDate('"page_views"."timestamp"', tz))}::text`, views: sql<number>`count(*)` })
           .from(pageViews).where(and(eq(pageViews.websiteId, id), sql`${pageViews.timestamp} >= ${last28Start.toISOString()}`))
-          .groupBy(sql`DATE_TRUNC('day', ${pageViews.timestamp})`).orderBy(sql`DATE_TRUNC('day', ${pageViews.timestamp})`),
+          .groupBy(sql.raw(tzDate('"page_views"."timestamp"', tz))).orderBy(sql.raw(tzDate('"page_views"."timestamp"', tz))),
         // Last 28 days visitors — use pageViews to count all visitors (including imported)
-        ctx.db.select({ day: sql<string>`DATE_TRUNC('day', ${pageViews.timestamp})::date::text`, count: sql<number>`count(DISTINCT ${pageViews.visitorId})` })
+        ctx.db.select({ day: sql<string>`${sql.raw(tzDate('"page_views"."timestamp"', tz))}::text`, count: sql<number>`count(DISTINCT ${pageViews.visitorId})` })
           .from(pageViews).where(and(eq(pageViews.websiteId, id), sql`${pageViews.timestamp} >= ${last28Start.toISOString()}`))
-          .groupBy(sql`DATE_TRUNC('day', ${pageViews.timestamp})`).orderBy(sql`DATE_TRUNC('day', ${pageViews.timestamp})`),
+          .groupBy(sql.raw(tzDate('"page_views"."timestamp"', tz))).orderBy(sql.raw(tzDate('"page_views"."timestamp"', tz))),
         // Last activity
         ctx.db.query.pageViews.findFirst({ where: eq(pageViews.websiteId, id), orderBy: [desc(pageViews.timestamp)], columns: { timestamp: true } }),
         // External API breakdowns removed — data is already imported into page_views/visitors
@@ -736,17 +737,18 @@ export const websitesRouter = router({
 
       const viewsByDay = new Map(chartRaw.map((r) => [r.day, Number(r.views)]))
       const chartDaysData = Array.from({ length: chartDays }, (_, i) => {
-        const d = new Date(chartStart)
-        d.setUTCDate(d.getUTCDate() + i)
-        return { date: d.toISOString().slice(0, 10), views: viewsByDay.get(d.toISOString().slice(0, 10)) ?? 0 }
+        const d = new Date(periodStart)
+        d.setDate(d.getDate() + i)
+        const dateKey = d.toLocaleDateString('en-CA', { timeZone: tz })
+        return { date: dateKey, views: viewsByDay.get(dateKey) ?? 0 }
       })
 
       const viewsByDay28 = new Map(last28Raw.map((r) => [r.day, Number(r.views)]))
       const visitorsByDay28 = new Map(last28VisitorsRaw.map((r) => [r.day, Number(r.count)]))
       const last28DaysData = Array.from({ length: 28 }, (_, i) => {
         const d = new Date(last28Start)
-        d.setUTCDate(d.getUTCDate() + i)
-        const dateKey = d.toISOString().slice(0, 10)
+        d.setDate(d.getDate() + i)
+        const dateKey = d.toLocaleDateString('en-CA', { timeZone: tz })
         return { date: dateKey, views: viewsByDay28.get(dateKey) ?? 0, visitors: visitorsByDay28.get(dateKey) ?? 0 }
       })
 

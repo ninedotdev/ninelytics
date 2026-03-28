@@ -373,7 +373,7 @@ export default function WebsiteDetailsPage() {
               <IconUsers size={16} className="text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{stats.periodStats.visitors.toLocaleString()}</div>
+              <div className="text-2xl font-bold">{stats.today.visitors.toLocaleString()}</div>
               <p className="text-xs text-muted-foreground">
                 Unique visitors today
               </p>
@@ -386,7 +386,7 @@ export default function WebsiteDetailsPage() {
               <IconEye size={16} className="text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{stats.periodStats.pageViews.toLocaleString()}</div>
+              <div className="text-2xl font-bold">{stats.today.pageViews.toLocaleString()}</div>
               <p className="text-xs text-muted-foreground">Total views today</p>
             </CardContent>
           </Card>

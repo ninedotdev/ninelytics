@@ -14,6 +14,9 @@ import {
   IconTrendingUp,
   IconLayoutGrid,
   IconList,
+  IconCircleFilled,
+  IconChevronLeft,
+  IconChevronRight,
 } from "@tabler/icons-react";
 import { WebsiteDeletionProgress } from "@/components/website-deletion-progress";
 import { Button } from "@/components/ui/button";
@@ -41,6 +44,14 @@ import { GoogleAnalytics } from "@/components/icons/google-analytics";
 import { api } from "@/utils/trpc";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useTimezone } from "@/hooks/use-timezone";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 
 interface Website {
   id: string;
@@ -89,7 +100,7 @@ export default function WebsitesPage() {
   const timezone = useTimezone().timezone;
   const { data, isLoading, refetch, isFetching } = api.websites.optimized.useQuery(
     { page, pageSize, timezone },
-    { placeholderData: (previousData) => previousData, staleTime: 0, refetchOnMount: true, refetchOnWindowFocus: true }
+    { placeholderData: (previousData) => previousData, staleTime: 30_000, refetchOnWindowFocus: true }
   );
 
   useEffect(() => {
@@ -274,69 +285,168 @@ export default function WebsitesPage() {
         ) : (
           <>
           {viewMode === "list" ? (
-          <div className="space-y-2">
-            {[...websites].sort((a, b) => {
-              const trendA = a.quickStats?.trend ?? 0;
-              const trendB = b.quickStats?.trend ?? 0;
-              if (trendB !== trendA) return trendB - trendA;
-              return (b.quickStats?.visitorsToday ?? 0) - (a.quickStats?.visitorsToday ?? 0);
-            }).map((website) => {
-              const trend = website.quickStats?.trend ?? 0;
-              const visitorsToday = website.quickStats?.visitorsToday ?? 0;
-              const views7d = website.quickStats?.viewsLast7Days ?? 0;
-              const perfBadge = visitorsToday === 0 && views7d === 0
-                ? { label: "Inactive", variant: "warning" as const }
-                : trend >= 20
-                ? { label: "On Fire", variant: "destructive" as const }
-                : trend > 0
-                ? { label: "Growing", variant: "success" as const }
-                : trend < 0
-                ? { label: "Declining", variant: "info" as const }
-                : { label: "Steady", variant: "secondary" as const };
-              return (
-                <div
-                  key={website.id}
-                  className="flex items-center gap-4 p-3 rounded-lg border bg-card hover:bg-accent/50 cursor-pointer transition-colors"
-                  onClick={() => router.push(`/websites/${website.id}`)}
+          <div className="rounded-xl border border-border bg-card overflow-hidden">
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow className="hover:bg-transparent">
+                    <TableHead>Website</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead className="text-right">Visitors Today</TableHead>
+                    <TableHead className="text-right">Views (7d)</TableHead>
+                    <TableHead className="text-right">Trend</TableHead>
+                    <TableHead className="text-right">Data</TableHead>
+                    <TableHead className="w-10"></TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {[...websites].sort((a, b) => {
+                    const trendA = a.quickStats?.trend ?? 0;
+                    const trendB = b.quickStats?.trend ?? 0;
+                    if (trendB !== trendA) return trendB - trendA;
+                    return (b.quickStats?.visitorsToday ?? 0) - (a.quickStats?.visitorsToday ?? 0);
+                  }).map((website) => {
+                    const trend = website.quickStats?.trend ?? 0;
+                    const visitorsToday = website.quickStats?.visitorsToday ?? 0;
+                    const views7d = website.quickStats?.viewsLast7Days ?? 0;
+                    const statusDot = website.status === "ACTIVE"
+                      ? "text-emerald-500"
+                      : website.status === "INACTIVE"
+                      ? "text-gray-400"
+                      : "text-amber-500";
+                    const statusLabel = website.status === "ACTIVE" ? "Active" : website.status === "INACTIVE" ? "Inactive" : "Pending";
+                    return (
+                      <TableRow
+                        key={website.id}
+                        className="cursor-pointer"
+                        onClick={() => router.push(`/websites/${website.id}`)}
+                      >
+                        <TableCell>
+                          <div className="flex items-center gap-3">
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                              src={`https://www.google.com/s2/favicons?domain=${new URL(website.url).hostname}&sz=32`}
+                              alt=""
+                              width={20}
+                              height={20}
+                              className="rounded-sm shrink-0"
+                              onError={(e) => { (e.target as HTMLImageElement).style.display = "none" }}
+                            />
+                            <div className="min-w-0">
+                              <div className="font-medium text-foreground">{website.name}</div>
+                              <div className="text-xs text-muted-foreground truncate max-w-[200px]">{website.url}</div>
+                            </div>
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex items-center gap-1.5">
+                            <IconCircleFilled className={`size-2.5 ${statusDot}`} />
+                            <span className={`text-sm ${website.status === "ACTIVE" ? "text-emerald-600 dark:text-emerald-400" : website.status === "INACTIVE" ? "text-muted-foreground" : "text-amber-600 dark:text-amber-400"}`}>
+                              {statusLabel}
+                            </span>
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums font-medium">
+                          {visitorsToday.toLocaleString()}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums font-medium">
+                          {views7d.toLocaleString()}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {trend !== 0 ? (
+                            <Badge variant={trend > 0 ? "success" : "error"} size="sm">
+                              {trend > 0 ? "+" : ""}{trend}%
+                            </Badge>
+                          ) : (
+                            <span className="text-sm text-muted-foreground">—</span>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <span className="text-sm text-muted-foreground">
+                            {getDataAge(website._count.analyticsData, website.createdAt)}
+                          </span>
+                        </TableCell>
+                        <TableCell>
+                          <DropdownMenu>
+                            <DropdownMenuTrigger
+                              asChild
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+                                <IconDots size={16} />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              <DropdownMenuItem
+                                onClick={(e) => { e.stopPropagation(); router.push(`/websites/${website.id}`); }}
+                              >
+                                <IconEye size={16} className="mr-2" />
+                                View Details
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onClick={(e) => { e.stopPropagation(); router.push(`/analytics?website=${website.id}`); }}
+                              >
+                                <IconChartBar size={16} className="mr-2" />
+                                View Analytics
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem
+                                onClick={(e) => { e.stopPropagation(); window.open(website.url, "_blank"); }}
+                              >
+                                <IconExternalLink size={16} className="mr-2" />
+                                Visit Website
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onClick={(e) => { e.stopPropagation(); router.push(`/websites/${website.id}/settings`); }}
+                              >
+                                <IconSettings size={16} className="mr-2" />
+                                Settings
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem
+                                onClick={(e) => { e.stopPropagation(); deleteWebsite(website.id); }}
+                                className="text-red-600 dark:text-red-400"
+                              >
+                                <IconTrash size={16} className="mr-2" />
+                                Delete
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+            <div className="flex items-center justify-between px-4 py-3 border-t">
+              <span className="text-sm text-muted-foreground">
+                {total === 0 ? "0 websites" : `Showing ${Math.min((page - 1) * pageSize + 1, total)} to ${Math.min(page * pageSize, total)} of ${total} websites`}
+              </span>
+              <div className="flex items-center gap-1">
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="size-8"
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  disabled={page === 1 || isFetching}
                 >
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={`https://www.google.com/s2/favicons?domain=${new URL(website.url).hostname}&sz=32`}
-                    alt=""
-                    width={20}
-                    height={20}
-                    className="rounded-sm shrink-0"
-                    onError={(e) => { (e.target as HTMLImageElement).style.display = "none" }}
-                  />
-                  <div className="min-w-0 flex-1">
-                    <div className="font-medium text-sm truncate">{website.name}</div>
-                    <div className="text-xs text-muted-foreground truncate">{website.url}</div>
-                  </div>
-                  <div className="flex items-center shrink-0 text-sm tabular-nums">
-                    <div className="text-right w-16">
-                      <div className="font-medium">{website.quickStats?.visitorsToday ?? 0}</div>
-                      <div className="text-xs text-muted-foreground">today</div>
-                    </div>
-                    <div className="text-right w-20">
-                      <div className="font-medium">{(website.quickStats?.viewsLast7Days ?? 0).toLocaleString()}</div>
-                      <div className="text-xs text-muted-foreground">7d views</div>
-                    </div>
-                    <div className="w-12 text-right">
-                      {trend !== 0 ? (
-                        <span className={`text-xs font-medium ${trend > 0 ? "text-green-500" : "text-red-400"}`}>
-                          {trend > 0 ? "+" : ""}{trend}%
-                        </span>
-                      ) : <span className="text-xs text-muted-foreground">—</span>}
-                    </div>
-                    <div className="w-20 text-right">
-                      <Badge variant={perfBadge.variant} size="sm">
-                        {perfBadge.label}
-                      </Badge>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
+                  <IconChevronLeft size={16} />
+                </Button>
+                <span className="px-2 text-sm tabular-nums">
+                  {page} / {Math.max(1, Math.ceil(total / pageSize))}
+                </span>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="size-8"
+                  onClick={() => setPage((p) => (p < Math.ceil(total / pageSize) ? p + 1 : p))}
+                  disabled={isFetching || page * pageSize >= total}
+                >
+                  <IconChevronRight size={16} />
+                </Button>
+              </div>
+            </div>
           </div>
           ) : (
           <div className="grid gap-8 md:grid-cols-2 lg:grid-cols-3">
@@ -529,32 +639,36 @@ export default function WebsitesPage() {
             })}
           </div>
           )}
+          {viewMode === "grid" && (
           <div className="flex items-center justify-between pt-4">
             <span className="text-sm text-muted-foreground">
-              Page {page} · Showing {websites.length} of {total}
+              {total === 0 ? "0 websites" : `Showing ${Math.min((page - 1) * pageSize + 1, total)} to ${Math.min(page * pageSize, total)} of ${total} websites`}
             </span>
-            <div className="flex gap-2">
+            <div className="flex items-center gap-1">
               <Button
                 variant="outline"
-                size="sm"
+                size="icon"
+                className="size-8"
                 onClick={() => setPage((p) => Math.max(1, p - 1))}
                 disabled={page === 1 || isFetching}
               >
-                Prev
+                <IconChevronLeft size={16} />
               </Button>
+              <span className="px-2 text-sm tabular-nums">
+                {page} / {Math.max(1, Math.ceil(total / pageSize))}
+              </span>
               <Button
                 variant="outline"
-                size="sm"
-                onClick={() => {
-                  const maxPage = Math.max(1, Math.ceil(total / pageSize));
-                  setPage((p) => (p < maxPage ? p + 1 : p));
-                }}
+                size="icon"
+                className="size-8"
+                onClick={() => setPage((p) => (p < Math.ceil(total / pageSize) ? p + 1 : p))}
                 disabled={isFetching || page * pageSize >= total}
               >
-                Next
+                <IconChevronRight size={16} />
               </Button>
             </div>
           </div>
+          )}
           </>
         )}
       </div>

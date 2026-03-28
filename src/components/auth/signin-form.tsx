@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { signIn } from "next-auth/react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import * as z from "zod";
@@ -26,6 +26,18 @@ export function SignInForm() {
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
   const [isGitHubLoading, setIsGitHubLoading] = useState(false);
   const router = useRouter();
+  const searchParams = useSearchParams();
+
+  useEffect(() => {
+    const error = searchParams.get("error");
+    if (error === "AccountNotFound") {
+      sileo.error({ title: "Account not found. Please contact your administrator." });
+    } else if (error === "NoEmail") {
+      sileo.error({ title: "Could not retrieve email from provider." });
+    } else if (error === "OAuthAccountNotLinked") {
+      sileo.error({ title: "This email is already registered with a different sign-in method." });
+    }
+  }, [searchParams]);
 
   const {
     register,

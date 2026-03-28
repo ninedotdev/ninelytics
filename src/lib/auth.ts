@@ -5,13 +5,18 @@ import CredentialsProvider from "next-auth/providers/credentials"
 import GoogleProvider from "next-auth/providers/google"
 import GitHubProvider from "next-auth/providers/github"
 import { db } from "@/server/db/client"
-import { users } from "@/server/db/schema"
-import { eq } from "drizzle-orm"
+import { users, accounts, sessions, verificationTokens } from "@/server/db/schema"
+import { eq, sql } from "drizzle-orm"
 import bcrypt from "bcryptjs"
 
 export const authOptions: NextAuthOptions = {
   secret: process.env.NEXTAUTH_SECRET,
-  adapter: DrizzleAdapter(db) as Adapter,
+  adapter: DrizzleAdapter(db, {
+    usersTable: users as any,
+    accountsTable: accounts as any,
+    sessionsTable: sessions as any,
+    verificationTokensTable: verificationTokens as any,
+  }) as Adapter,
   providers: [
     CredentialsProvider({
       name: "credentials",
@@ -94,6 +99,34 @@ export const authOptions: NextAuthOptions = {
     strategy: "jwt",
   },
   callbacks: {
+    async signIn({ user, account }) {
+      // Credentials provider handles its own validation
+      if (account?.provider === "credentials") return true
+
+      if (!user?.email) return "/auth/signin?error=NoEmail"
+
+      // Check if user already exists
+      const [existingUser] = await db
+        .select({ id: users.id })
+        .from(users)
+        .where(eq(users.email, user.email))
+        .limit(1)
+
+      if (existingUser) return true
+
+      // New user — allow if multitenant is enabled
+      if (process.env.NEXT_PUBLIC_IS_MULTI_TENANT === "true") return true
+
+      // New user, single-tenant — allow if no users exist yet (first setup)
+      const [{ count }] = await db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(users)
+
+      if (count === 0) return true
+
+      // Single-tenant with existing users — block new registrations
+      return "/auth/signin?error=AccountNotFound"
+    },
     async jwt({ token, user }) {
       if (user) {
         token.role = user.role

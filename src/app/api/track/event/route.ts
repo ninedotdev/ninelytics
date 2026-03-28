@@ -121,21 +121,32 @@ export async function POST(request: NextRequest) {
     })
 
     if (eventType === 'performance' && properties) {
-      try {
-        await db.insert(performanceMetrics).values({
-          websiteId,
-          sessionId,
-          page: properties.page || page,
-          loadTime: properties.loadTime || 0,
-          domContentLoaded: properties.domContentLoaded || 0,
-          timeToInteractive: properties.timeToInteractive || 0,
-          firstPaint: properties.firstPaint || null,
-          firstContentfulPaint: properties.firstContentfulPaint || null,
-          navigationType: properties.navigationType || 0,
-          timestamp: timestamp ? new Date(timestamp).toISOString() : new Date().toISOString()
-        })
-      } catch (error) {
-        console.error('Error saving performance metric:', error)
+      // Clamp values to valid int32 range (0 to 300000ms = 5min max)
+      const clamp = (v: unknown) => {
+        const n = Number(v) || 0
+        return n > 0 && n <= 300000 ? Math.round(n) : 0
+      }
+      const lt = clamp(properties.loadTime)
+      const dcl = clamp(properties.domContentLoaded)
+      const tti = clamp(properties.timeToInteractive)
+      // Skip if all zeros — no useful data
+      if (lt > 0 || dcl > 0 || tti > 0) {
+        try {
+          await db.insert(performanceMetrics).values({
+            websiteId,
+            sessionId,
+            page: properties.page || page,
+            loadTime: lt,
+            domContentLoaded: dcl,
+            timeToInteractive: tti,
+            firstPaint: clamp(properties.firstPaint) || null,
+            firstContentfulPaint: clamp(properties.firstContentfulPaint) || null,
+            navigationType: Number(properties.navigationType) || 0,
+            timestamp: timestamp ? new Date(timestamp).toISOString() : new Date().toISOString()
+          })
+        } catch (error) {
+          console.error('Performance metric error:', error)
+        }
       }
     }
 

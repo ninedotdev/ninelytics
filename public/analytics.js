@@ -312,26 +312,46 @@
     };
   }
 
-  // Performance metrics
+  // Performance metrics — use modern PerformanceNavigationTiming API
   function getPerformanceMetrics() {
-    if (!window.performance || !window.performance.timing) {
+    if (!window.performance) return null;
+
+    var entries = window.performance.getEntriesByType && window.performance.getEntriesByType('navigation');
+    var nav = entries && entries[0];
+
+    var loadTime, domContentLoaded, timeToInteractive, navigationType;
+
+    if (nav) {
+      // Modern API — values are relative to startTime (0), always positive
+      loadTime = Math.round(nav.loadEventEnd || nav.domComplete || 0);
+      domContentLoaded = Math.round(nav.domContentLoadedEventEnd || 0);
+      timeToInteractive = Math.round(nav.domInteractive || 0);
+      navigationType = nav.type === 'reload' ? 1 : nav.type === 'back_forward' ? 2 : 0;
+    } else if (window.performance.timing) {
+      // Legacy fallback
+      var timing = window.performance.timing;
+      loadTime = timing.loadEventEnd - timing.navigationStart;
+      domContentLoaded = timing.domContentLoadedEventEnd - timing.navigationStart;
+      timeToInteractive = timing.domInteractive - timing.navigationStart;
+      navigationType = window.performance.navigation ? window.performance.navigation.type : 0;
+    } else {
       return null;
     }
 
-    const timing = window.performance.timing;
-    const navigation = window.performance.navigation;
+    // Validate — discard negative or absurdly large values (> 5 min)
+    if (loadTime <= 0 || loadTime > 300000) loadTime = 0;
+    if (domContentLoaded <= 0 || domContentLoaded > 300000) domContentLoaded = 0;
+    if (timeToInteractive <= 0 || timeToInteractive > 300000) timeToInteractive = 0;
 
-    const loadTime = timing.loadEventEnd - timing.navigationStart;
-    const domContentLoaded = timing.domContentLoadedEventEnd - timing.navigationStart;
-    const timeToInteractive = timing.domInteractive - timing.navigationStart;
+    // Skip if we have no valid data
+    if (loadTime === 0 && domContentLoaded === 0 && timeToInteractive === 0) return null;
 
-    let firstPaint = null;
-    let firstContentfulPaint = null;
+    var firstPaint = null;
+    var firstContentfulPaint = null;
 
-    // Get paint timing if available
     if (window.performance.getEntriesByType) {
-      const paintEntries = window.performance.getEntriesByType('paint');
-      paintEntries.forEach(entry => {
+      var paintEntries = window.performance.getEntriesByType('paint');
+      paintEntries.forEach(function(entry) {
         if (entry.name === 'first-paint') {
           firstPaint = Math.round(entry.startTime);
         } else if (entry.name === 'first-contentful-paint') {
@@ -341,12 +361,12 @@
     }
 
     return {
-      loadTime: Math.round(loadTime),
-      domContentLoaded: Math.round(domContentLoaded),
-      timeToInteractive: Math.round(timeToInteractive),
-      firstPaint,
-      firstContentfulPaint,
-      navigationType: navigation.type, // 0: navigate, 1: reload, 2: back/forward
+      loadTime: loadTime,
+      domContentLoaded: domContentLoaded,
+      timeToInteractive: timeToInteractive,
+      firstPaint: firstPaint,
+      firstContentfulPaint: firstContentfulPaint,
+      navigationType: navigationType,
     };
   }
 
