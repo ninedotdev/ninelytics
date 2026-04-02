@@ -14,9 +14,10 @@ import { isBotRequest } from '@/lib/bot-detection'
 import { isIpBlocked } from '@/lib/ip-filter'
 import { normalizeUrl } from '@/lib/url-normalization'
 import { getGeoLocation } from '@/lib/geolocation'
-import { upsertVisitor, upsertSession } from '@/lib/tracking-helpers'
+import { upsertVisitor, upsertSession, updateSessionMetrics } from '@/lib/tracking-helpers'
 import { realtimeHelpers, isRedisConnected } from '@/lib/redis'
 import { isPathExcluded } from '@/lib/path-exclusions'
+import { getActiveWebsiteByTrackingCode } from '@/lib/tracking-websites'
 
 export interface CollectPayload {
   type: 'pageview' | 'event' | 'session'
@@ -74,9 +75,10 @@ export interface CollectResult {
   id?: string
   excluded?: boolean
   error?: string
+  updated?: boolean
 }
 
-interface RequestContext {
+export interface RequestContext {
   ipAddress: string
   headerUserAgent: string
   headers: Headers
@@ -91,36 +93,26 @@ function getRequestContext(request: NextRequest): RequestContext {
   return { ipAddress, headerUserAgent, headers: request.headers }
 }
 
+export function createRequestContextFromHeaders(
+  ipAddress: string,
+  headerUserAgent: string,
+  headerMap: Record<string, string | undefined>
+): RequestContext {
+  const headers = new Headers()
+
+  for (const [key, value] of Object.entries(headerMap)) {
+    if (value != null) {
+      headers.set(key, value)
+    }
+  }
+
+  return { ipAddress, headerUserAgent, headers }
+}
+
 const parseDate = (value?: string | number): string => {
   if (!value) return new Date().toISOString()
   const d = new Date(value)
   return isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString()
-}
-
-// Website lookup cache (short-lived, avoids repeated DB hits in batch)
-const websiteCache = new Map<string, { id: string; excludedPaths: string[]; expiry: number }>()
-
-async function getWebsite(trackingCode: string) {
-  const cached = websiteCache.get(trackingCode)
-  if (cached && cached.expiry > Date.now()) {
-    return cached
-  }
-
-  const rows = await db
-    .select({ id: websites.id, excludedPaths: websites.excludedPaths })
-    .from(websites)
-    .where(and(eq(websites.trackingCode, trackingCode), eq(websites.status, 'ACTIVE')))
-    .limit(1)
-
-  if (rows.length === 0) return null
-
-  const result = {
-    id: rows[0].id,
-    excludedPaths: (rows[0].excludedPaths as string[] | null) ?? [],
-    expiry: Date.now() + 60_000, // Cache for 1 minute
-  }
-  websiteCache.set(trackingCode, result)
-  return result
 }
 
 /**
@@ -136,7 +128,7 @@ export async function processEvent(
     return { success: false, error: 'Missing required fields' }
   }
 
-  const website = await getWebsite(trackingCode)
+  const website = await getActiveWebsiteByTrackingCode(trackingCode)
   if (!website) {
     return { success: false, error: 'Invalid tracking code' }
   }
@@ -155,48 +147,49 @@ export async function processEvent(
       const page = normalizeUrl(payload.page) || payload.page
       const referrer = normalizeUrl(payload.referrer) ?? payload.referrer
 
-      await upsertVisitor({
-        websiteId,
-        visitorId,
-        ipAddress: ctx.ipAddress,
-        userAgent: payload.userAgent || ctx.headerUserAgent,
-        browser: payload.browser,
-        os: payload.os,
-        device: payload.device,
-        screenResolution: payload.screenResolution,
-        viewport: payload.viewport,
-        language: payload.language,
-        timezone: payload.timezone,
-        connection: payload.connection,
-        pixelRatio: payload.pixelRatio,
-        cookieEnabled: payload.cookieEnabled,
-        doNotTrack: payload.doNotTrack,
-        country: geoData.country,
-        state: geoData.regionName || geoData.region,
-        city: geoData.city,
-        lat: geoData.lat,
-        lon: geoData.lon,
-      }, true, false)
-
-      await upsertSession({
-        websiteId,
-        visitorId,
-        sessionId,
-        referrer,
-        landingPage: page,
-        exitPage: page,
-        utmSource: payload.utmSource,
-        utmMedium: payload.utmMedium,
-        utmCampaign: payload.utmCampaign,
-        utmTerm: payload.utmTerm,
-        utmContent: payload.utmContent,
-        source: payload.source,
-        medium: payload.medium,
-        referrerDomain: payload.referrerDomain,
-        isSearchEngine: payload.isSearchEngine,
-        searchEngine: payload.searchEngine,
-        socialNetwork: payload.socialNetwork,
-      }, true)
+      await Promise.all([
+        upsertVisitor({
+          websiteId,
+          visitorId,
+          ipAddress: ctx.ipAddress,
+          userAgent: payload.userAgent || ctx.headerUserAgent,
+          browser: payload.browser,
+          os: payload.os,
+          device: payload.device,
+          screenResolution: payload.screenResolution,
+          viewport: payload.viewport,
+          language: payload.language,
+          timezone: payload.timezone,
+          connection: payload.connection,
+          pixelRatio: payload.pixelRatio,
+          cookieEnabled: payload.cookieEnabled,
+          doNotTrack: payload.doNotTrack,
+          country: geoData.country,
+          state: geoData.regionName || geoData.region,
+          city: geoData.city,
+          lat: geoData.lat,
+          lon: geoData.lon,
+        }, true, false),
+        upsertSession({
+          websiteId,
+          visitorId,
+          sessionId,
+          referrer,
+          landingPage: page,
+          exitPage: page,
+          utmSource: payload.utmSource,
+          utmMedium: payload.utmMedium,
+          utmCampaign: payload.utmCampaign,
+          utmTerm: payload.utmTerm,
+          utmContent: payload.utmContent,
+          source: payload.source,
+          medium: payload.medium,
+          referrerDomain: payload.referrerDomain,
+          isSearchEngine: payload.isSearchEngine,
+          searchEngine: payload.searchEngine,
+          socialNetwork: payload.socialNetwork,
+        }, true),
+      ])
 
       const [pv] = await db.insert(pageViews).values({
         websiteId,
@@ -234,47 +227,48 @@ export async function processEvent(
         return { success: false, error: 'Missing event fields' }
       }
 
-      await upsertVisitor({
-        websiteId,
-        visitorId,
-        ipAddress: ctx.ipAddress,
-        userAgent: payload.userAgent || ctx.headerUserAgent,
-        browser: payload.browser,
-        os: payload.os,
-        device: payload.device,
-        screenResolution: payload.screenResolution,
-        viewport: payload.viewport,
-        language: payload.language,
-        timezone: payload.timezone,
-        connection: payload.connection,
-        pixelRatio: payload.pixelRatio,
-        cookieEnabled: payload.cookieEnabled,
-        doNotTrack: payload.doNotTrack,
-        country: geoData.country,
-        state: geoData.regionName || geoData.region,
-        city: geoData.city,
-        lat: geoData.lat,
-        lon: geoData.lon,
-      })
-
-      await upsertSession({
-        websiteId,
-        visitorId,
-        sessionId,
-        referrer: payload.referrer,
-        landingPage: payload.landingPage || payload.page,
-        utmSource: payload.utmSource,
-        utmMedium: payload.utmMedium,
-        utmCampaign: payload.utmCampaign,
-        utmTerm: payload.utmTerm,
-        utmContent: payload.utmContent,
-        source: payload.source,
-        medium: payload.medium,
-        referrerDomain: payload.referrerDomain,
-        isSearchEngine: payload.isSearchEngine,
-        searchEngine: payload.searchEngine,
-        socialNetwork: payload.socialNetwork,
-      })
+      await Promise.all([
+        upsertVisitor({
+          websiteId,
+          visitorId,
+          ipAddress: ctx.ipAddress,
+          userAgent: payload.userAgent || ctx.headerUserAgent,
+          browser: payload.browser,
+          os: payload.os,
+          device: payload.device,
+          screenResolution: payload.screenResolution,
+          viewport: payload.viewport,
+          language: payload.language,
+          timezone: payload.timezone,
+          connection: payload.connection,
+          pixelRatio: payload.pixelRatio,
+          cookieEnabled: payload.cookieEnabled,
+          doNotTrack: payload.doNotTrack,
+          country: geoData.country,
+          state: geoData.regionName || geoData.region,
+          city: geoData.city,
+          lat: geoData.lat,
+          lon: geoData.lon,
+        }),
+        upsertSession({
+          websiteId,
+          visitorId,
+          sessionId,
+          referrer: payload.referrer,
+          landingPage: payload.landingPage || payload.page,
+          utmSource: payload.utmSource,
+          utmMedium: payload.utmMedium,
+          utmCampaign: payload.utmCampaign,
+          utmTerm: payload.utmTerm,
+          utmContent: payload.utmContent,
+          source: payload.source,
+          medium: payload.medium,
+          referrerDomain: payload.referrerDomain,
+          isSearchEngine: payload.isSearchEngine,
+          searchEngine: payload.searchEngine,
+          socialNetwork: payload.socialNetwork,
+        }),
+      ])
 
       if (payload.eventType === 'performance' && payload.properties) {
         const props = payload.properties
@@ -340,6 +334,20 @@ export async function processEvent(
         lat: geoData.lat,
         lon: geoData.lon,
       }, false, true)
+
+      if (
+        payload.duration !== undefined ||
+        payload.isBounce !== undefined ||
+        payload.pageViewCount !== undefined
+      ) {
+        await updateSessionMetrics(websiteId, sessionId, {
+          duration: payload.duration,
+          pageViewCount: payload.pageViewCount,
+          isBounce: payload.isBounce,
+        })
+
+        return { success: true, updated: true }
+      }
 
       const session = await upsertSession({
         websiteId,

@@ -7,6 +7,9 @@ const createClient = () => {
   const url = getDatabaseUrl()
 
   return postgres(url, {
+    // PgBouncer runs in transaction mode in Docker/Coolify, so prepared
+    // statements can break or hang under load when connections are reused.
+    prepare: false,
     max: DB_CONFIG.CONNECTION_LIMIT,
     idle_timeout: DB_CONFIG.POOL_TIMEOUT,
     connect_timeout: DB_CONFIG.CONNECT_TIMEOUT,

@@ -1,14 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { realtimeHelpers } from '@/lib/redis'
-import { upsertVisitor, upsertSession } from '@/lib/tracking-helpers'
-import { getClientIp } from '@/lib/get-client-ip'
 import { isBotRequest } from '@/lib/bot-detection'
+import { createRequestContext, processEvent, type CollectPayload } from '@/lib/collect'
 import { isIpBlocked } from '@/lib/ip-filter'
 import { checkRateLimit, RATE_LIMITS } from '@/lib/rate-limiter'
-import { db } from '@/server/db/client'
-import { websites, events, performanceMetrics } from '@/server/db/schema'
-import { eq, and } from 'drizzle-orm'
-import { eventQueue } from '@/lib/event-queue'
+import { isAbortLikeError } from '@/lib/request-errors'
+import { createClientClosedResponse } from '@/lib/tracking-response'
+import { enqueueTrackingJob, serializeTrackingRequestContext } from '@/lib/tracking-queue'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -22,21 +19,18 @@ export async function OPTIONS() {
 
 export async function POST(request: NextRequest) {
   try {
-    // Bot detection
     if (isBotRequest(request.headers.get('user-agent'))) {
       return NextResponse.json(null, { status: 404, headers: corsHeaders })
     }
 
-    // IP blocking
     const clientIp = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
       || request.headers.get('x-real-ip') || 'unknown'
     if (isIpBlocked(clientIp)) {
       return NextResponse.json(null, { status: 404, headers: corsHeaders })
     }
 
-    // Rate limiting
     const rateLimitKey = RATE_LIMITS.track.keyGenerator(request)
-    const { allowed, remaining, resetTime } = await checkRateLimit(rateLimitKey, RATE_LIMITS.track)
+    const { allowed, resetTime } = await checkRateLimit(rateLimitKey, RATE_LIMITS.track)
     if (!allowed) {
       const retryAfter = Math.ceil((resetTime - Date.now()) / 1000)
       return NextResponse.json(
@@ -46,45 +40,19 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json()
-
-    const {
-      trackingCode,
-      visitorId,
-      sessionId,
-      eventType,
-      eventName,
-      page,
-      properties,
-      timestamp
-    } = body
-
-    if (!trackingCode || !visitorId || !sessionId || !eventType || !eventName || !page) {
-      return NextResponse.json(
-        { error: 'Missing required fields' },
-        { status: 400, headers: corsHeaders }
-      )
-    }
-
-    const websiteRows = await db
-      .select({ id: websites.id })
-      .from(websites)
-      .where(and(eq(websites.trackingCode, trackingCode), eq(websites.status, 'ACTIVE')))
-      .limit(1)
-
-    if (websiteRows.length === 0) {
-      return NextResponse.json(
-        { error: 'Invalid tracking code' },
-        { status: 404, headers: corsHeaders }
-      )
-    }
-
-    const websiteId = websiteRows[0].id
-
-    await upsertVisitor({
-      websiteId,
-      visitorId,
-      ipAddress: getClientIp(request.headers),
-      userAgent: request.headers.get('user-agent') || 'Unknown',
+    const payload: CollectPayload = {
+      type: 'event',
+      trackingCode: body.trackingCode,
+      visitorId: body.visitorId,
+      sessionId: body.sessionId,
+      eventType: body.eventType,
+      eventName: body.eventName,
+      page: body.page,
+      properties: body.properties,
+      timestamp: body.timestamp,
+      referrer: body.referrer,
+      landingPage: body.landingPage || body.page,
+      userAgent: body.userAgent,
       browser: body.browser,
       os: body.os,
       device: body.device,
@@ -96,17 +64,6 @@ export async function POST(request: NextRequest) {
       pixelRatio: body.pixelRatio,
       cookieEnabled: body.cookieEnabled,
       doNotTrack: body.doNotTrack,
-      country: body.country,
-      state: body.state,
-      city: body.city,
-    })
-
-    await upsertSession({
-      websiteId,
-      visitorId,
-      sessionId,
-      referrer: body.referrer,
-      landingPage: body.landingPage || page,
       utmSource: body.utmSource,
       utmMedium: body.utmMedium,
       utmCampaign: body.utmCampaign,
@@ -118,88 +75,51 @@ export async function POST(request: NextRequest) {
       isSearchEngine: body.isSearchEngine,
       searchEngine: body.searchEngine,
       socialNetwork: body.socialNetwork,
-    })
-
-    if (eventType === 'performance' && properties) {
-      // Clamp values to valid int32 range (0 to 300000ms = 5min max)
-      const clamp = (v: unknown) => {
-        const n = Number(v) || 0
-        return n > 0 && n <= 300000 ? Math.round(n) : 0
-      }
-      const lt = clamp(properties.loadTime)
-      const dcl = clamp(properties.domContentLoaded)
-      const tti = clamp(properties.timeToInteractive)
-      // Skip if all zeros — no useful data
-      if (lt > 0 || dcl > 0 || tti > 0) {
-        try {
-          await db.insert(performanceMetrics).values({
-            websiteId,
-            sessionId,
-            page: properties.page || page,
-            loadTime: lt,
-            domContentLoaded: dcl,
-            timeToInteractive: tti,
-            firstPaint: clamp(properties.firstPaint) || null,
-            firstContentfulPaint: clamp(properties.firstContentfulPaint) || null,
-            navigationType: Number(properties.navigationType) || 0,
-            timestamp: timestamp ? new Date(timestamp).toISOString() : new Date().toISOString()
-          })
-        } catch (error) {
-          console.error('Performance metric error:', error)
-        }
-      }
     }
 
-    let event
-    try {
-      const [inserted] = await db
-        .insert(events)
-        .values({
-          websiteId,
-          visitorId,
-          sessionId,
-          eventType,
-          eventName,
-          page,
-          properties: properties || {},
-          timestamp: timestamp ? new Date(timestamp).toISOString() : new Date().toISOString()
-        })
-        .returning({ id: events.id })
-
-      event = inserted
-    } catch (error) {
-      console.warn('Event creation failed, adding to queue:', error)
-      await eventQueue.addEvent({
-        websiteId,
-        visitorId,
-        sessionId,
-        eventType,
-        eventName,
-        page,
-        properties: properties || {},
-        timestamp: timestamp ? new Date(timestamp).toISOString() : new Date().toISOString()
-      })
-
+    if (!payload.trackingCode || !payload.visitorId || !payload.sessionId || !payload.eventType || !payload.eventName || !payload.page) {
       return NextResponse.json(
-        { success: true, queued: true, message: 'Event queued for processing' },
-        { headers: corsHeaders }
+        { error: 'Missing required fields' },
+        { status: 400, headers: corsHeaders }
       )
     }
 
-    realtimeHelpers.addLiveEvent(websiteId, {
-      type: eventType,
-      name: eventName,
-      page,
-      visitorId,
-      timestamp: Date.now(),
-      properties: properties || {},
-    }).catch((err) => console.error('Redis error:', err))
+    try {
+      await enqueueTrackingJob({
+        kind: 'collect',
+        payload,
+        context: serializeTrackingRequestContext(request.headers),
+      })
+
+      return NextResponse.json(
+        { success: true, queued: true },
+        { headers: corsHeaders }
+      )
+    } catch (queueError) {
+      console.error('Tracking event enqueue failed, falling back to inline processing:', queueError)
+    }
+
+    const ctx = createRequestContext(request)
+    if (!ctx) {
+      return NextResponse.json(null, { status: 404, headers: corsHeaders })
+    }
+
+    const result = await processEvent(payload, ctx)
+    if (!result.success) {
+      return NextResponse.json(
+        { error: result.error ?? 'Internal server error' },
+        { status: 400, headers: corsHeaders }
+      )
+    }
 
     return NextResponse.json(
-      { success: true, id: event?.id },
+      { success: true, id: result.id, updated: result.updated },
       { headers: corsHeaders }
     )
   } catch (error) {
+    if (isAbortLikeError(error)) {
+      return createClientClosedResponse(corsHeaders)
+    }
     console.error('Error tracking event:', error)
     return NextResponse.json(
       { error: 'Internal server error' },

@@ -6,6 +6,7 @@
     "dev": "next dev --turbopack",
     "build": "next build --turbopack",
     "start": "next start",
+    "worker:tracking": "tsx scripts/tracking-worker.ts",
     "lint": "eslint",
     "db:seed": "tsx scripts/seed.ts",
     "db:reset-seed": "tsx scripts/reset-and-seed.ts",

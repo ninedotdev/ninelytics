@@ -1,17 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { headers } from 'next/headers'
-import { getGeoLocation } from '@/lib/geolocation'
-import { getClientIp } from '@/lib/get-client-ip'
-import { realtimeHelpers } from '@/lib/redis'
-import { upsertVisitor, upsertSession } from '@/lib/tracking-helpers'
 import { isBotRequest } from '@/lib/bot-detection'
+import { createRequestContext, processEvent, type CollectPayload } from '@/lib/collect'
 import { isIpBlocked } from '@/lib/ip-filter'
-import { normalizeUrl } from '@/lib/url-normalization'
 import { checkRateLimit, RATE_LIMITS } from '@/lib/rate-limiter'
-import { isRedisConnected } from '@/lib/redis'
-import { db } from '@/server/db/client'
-import { websites, pageViews } from '@/server/db/schema'
-import { eq, and } from 'drizzle-orm'
+import { isAbortLikeError } from '@/lib/request-errors'
+import { createClientClosedResponse } from '@/lib/tracking-response'
+import { enqueueTrackingJob, serializeTrackingRequestContext } from '@/lib/tracking-queue'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -25,21 +19,18 @@ export async function OPTIONS() {
 
 export async function POST(request: NextRequest) {
   try {
-    // Bot detection
     if (isBotRequest(request.headers.get('user-agent'))) {
       return NextResponse.json(null, { status: 404, headers: corsHeaders })
     }
 
-    // IP blocking
     const clientIp = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
       || request.headers.get('x-real-ip') || 'unknown'
     if (isIpBlocked(clientIp)) {
       return NextResponse.json(null, { status: 404, headers: corsHeaders })
     }
 
-    // Rate limiting
     const rateLimitKey = RATE_LIMITS.track.keyGenerator(request)
-    const { allowed, remaining, resetTime } = await checkRateLimit(rateLimitKey, RATE_LIMITS.track)
+    const { allowed, resetTime } = await checkRateLimit(rateLimitKey, RATE_LIMITS.track)
     if (!allowed) {
       const retryAfter = Math.ceil((resetTime - Date.now()) / 1000)
       return NextResponse.json(
@@ -49,132 +40,83 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json()
-    const {
-      trackingCode,
-      visitorId,
-      sessionId,
-      page,
-      title,
-      referrer,
-      timestamp,
-      userAgent,
-      browser,
-      os,
-      device,
-      screenResolution,
-      viewport,
-      language,
-      timezone,
-      connection,
-      pixelRatio,
-      cookieEnabled,
-      doNotTrack
-    } = body
+    const payload: CollectPayload = {
+      type: 'pageview',
+      trackingCode: body.trackingCode,
+      visitorId: body.visitorId,
+      sessionId: body.sessionId,
+      page: body.page,
+      title: body.title,
+      referrer: body.referrer,
+      timestamp: body.timestamp,
+      userAgent: body.userAgent,
+      browser: body.browser,
+      os: body.os,
+      device: body.device,
+      screenResolution: body.screenResolution,
+      viewport: body.viewport,
+      language: body.language,
+      timezone: body.timezone,
+      connection: body.connection,
+      pixelRatio: body.pixelRatio,
+      cookieEnabled: body.cookieEnabled,
+      doNotTrack: body.doNotTrack,
+      utmSource: body.utmSource,
+      utmMedium: body.utmMedium,
+      utmCampaign: body.utmCampaign,
+      utmTerm: body.utmTerm,
+      utmContent: body.utmContent,
+      source: body.source,
+      medium: body.medium,
+      referrerDomain: body.referrerDomain,
+      isSearchEngine: body.isSearchEngine,
+      searchEngine: body.searchEngine,
+      socialNetwork: body.socialNetwork,
+    }
 
-    if (!trackingCode || !visitorId || !sessionId || !page) {
+    if (!payload.trackingCode || !payload.visitorId || !payload.sessionId || !payload.page) {
       return NextResponse.json(
         { error: 'Missing required fields' },
         { status: 400, headers: corsHeaders }
       )
     }
 
-    const headersList = await headers()
-    const ipAddress = getClientIp(headersList)
-    const headerUserAgent = headersList.get('user-agent') || 'unknown'
+    try {
+      await enqueueTrackingJob({
+        kind: 'collect',
+        payload,
+        context: serializeTrackingRequestContext(request.headers),
+      })
 
-    const websiteRows = await db
-      .select({ id: websites.id })
-      .from(websites)
-      .where(and(eq(websites.trackingCode, trackingCode), eq(websites.status, 'ACTIVE')))
-      .limit(1)
-
-    if (websiteRows.length === 0) {
       return NextResponse.json(
-        { error: 'Invalid tracking code' },
-        { status: 404, headers: corsHeaders }
+        { success: true, queued: true },
+        { headers: corsHeaders }
+      )
+    } catch (queueError) {
+      console.error('Tracking pageview enqueue failed, falling back to inline processing:', queueError)
+    }
+
+    const ctx = createRequestContext(request)
+    if (!ctx) {
+      return NextResponse.json(null, { status: 404, headers: corsHeaders })
+    }
+
+    const result = await processEvent(payload, ctx)
+    if (!result.success) {
+      return NextResponse.json(
+        { error: result.error ?? 'Internal server error' },
+        { status: 400, headers: corsHeaders }
       )
     }
 
-    const websiteId = websiteRows[0].id
-    const normalizedPage = normalizeUrl(page) || page
-    const normalizedReferrer = normalizeUrl(referrer) ?? referrer
-    const geoData = await getGeoLocation(ipAddress, headersList as unknown as Headers)
-
-    await upsertVisitor(
-      {
-        websiteId,
-        visitorId,
-        ipAddress,
-        userAgent: userAgent || headerUserAgent,
-        browser,
-        os,
-        device,
-        screenResolution,
-        viewport,
-        language,
-        timezone,
-        connection,
-        pixelRatio,
-        cookieEnabled,
-        doNotTrack,
-        country: geoData.country,
-        state: geoData.regionName || geoData.region,
-        city: geoData.city,
-        lat: geoData.lat,
-        lon: geoData.lon,
-      },
-      true,
-      false
-    )
-
-    await upsertSession(
-      {
-        websiteId,
-        visitorId,
-        sessionId,
-        referrer: normalizedReferrer,
-        landingPage: normalizedPage,
-        exitPage: normalizedPage,
-      },
-      true
-    )
-
-    const [pageView] = await db
-      .insert(pageViews)
-      .values({
-        websiteId,
-        visitorId,
-        sessionId,
-        page: normalizedPage,
-        title,
-        referrer: normalizedReferrer,
-        timestamp: timestamp ? new Date(timestamp).toISOString() : new Date().toISOString()
-      })
-      .returning({ id: pageViews.id })
-
-    if (isRedisConnected) {
-      realtimeHelpers.markVisitorActive(websiteId, visitorId, {
-        page: normalizedPage,
-        country: geoData.country ?? undefined,
-        city: geoData.city ?? undefined,
-        device,
-        browser,
-      }).catch((err) => console.error('Redis error:', err))
-
-      realtimeHelpers.addLiveEvent(websiteId, {
-        type: 'pageview',
-        name: 'Page View',
-        page: normalizedPage,
-        visitorId,
-        timestamp: Date.now(),
-      }).catch((err) => console.error('Redis error:', err))
-    }
-
     return NextResponse.json(
-      { success: true, id: pageView?.id },
+      { success: true, id: result.id, updated: result.updated },
       { headers: corsHeaders }
     )
   } catch (error) {
+    if (isAbortLikeError(error)) {
+      return createClientClosedResponse(corsHeaders)
+    }
     console.error('Error tracking page view:', error)
     return NextResponse.json(
       { error: 'Internal server error' },

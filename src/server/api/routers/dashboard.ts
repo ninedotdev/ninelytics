@@ -187,7 +187,8 @@ export const dashboardRouter = router({
       const [
         locations,
         dailyVisitorsCurrent,
-        dailyVisitorsPrev,
+        totalVisitorsResult,
+        prevTotalVisitorsResult,
         topPagesResult,
         topCountriesResult,
         topReferrersResult,
@@ -225,7 +226,15 @@ export const dashboardRouter = router({
           ORDER BY date
         `),
 
-        // Daily visitors previous 7 days — use pageViews to include imported data
+        // Unique visitors current 7 days — use pageViews to include imported data
+        ctx.db.execute<{ visitors: number }>(sql`
+          SELECT COUNT(DISTINCT visitor_id)::int as visitors
+          FROM page_views
+          WHERE website_id IN (${sql.join(targetIds.map(id => sql`${id}`), sql`, `)})
+            AND timestamp >= ${sevenDaysAgo.toISOString()}
+        `),
+
+        // Unique visitors previous 7 days — use pageViews to include imported data
         ctx.db.execute<{ visitors: number }>(sql`
           SELECT COUNT(DISTINCT visitor_id)::int as visitors
           FROM page_views
@@ -274,8 +283,8 @@ export const dashboardRouter = router({
         `),
       ])
 
-      const totalVisitors = dailyVisitorsCurrent.reduce((acc, d) => acc + Number(d.visitors), 0)
-      const prevTotalVisitors = Number(dailyVisitorsPrev[0]?.visitors ?? 0)
+      const totalVisitors = Number(totalVisitorsResult[0]?.visitors ?? 0)
+      const prevTotalVisitors = Number(prevTotalVisitorsResult[0]?.visitors ?? 0)
 
       const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
 
@@ -616,4 +625,3 @@ export const dashboardRouter = router({
     }
   }),
 })
-

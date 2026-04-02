@@ -105,6 +105,39 @@ services:
     networks:
       - ninelytics
 
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://${DB_USER:-postgres}:${DB_PASSWORD}@pgbouncer:6432/${DB_NAME:-ninelytics}
+      REDIS_URL: redis://dragonfly:6379
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:?Set NEXTAUTH_SECRET in .env}
+      NEXTAUTH_URL: ${APP_URL:-http://localhost:3000}
+      JWT_SECRET: ${JWT_SECRET:-${NEXTAUTH_SECRET}}
+      NEXT_PUBLIC_APP_URL: ${APP_URL:-http://localhost:3000}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      GOOGLE_AI_API_KEY: ${GOOGLE_AI_API_KEY:-}
+      GOOGLE_API_CLIENT_ID: ${GOOGLE_API_CLIENT_ID:-}
+      GOOGLE_API_CLIENT_SECRET: ${GOOGLE_API_CLIENT_SECRET:-}
+      MAXMIND_LICENSE_KEY: ${MAXMIND_LICENSE_KEY:-}
+      MAXMIND_DB_PATH: /var/data/GeoLite2-City.mmdb
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      RESEND_FROM_EMAIL: ${RESEND_FROM_EMAIL:-}
+      TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID:-}
+      TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN:-}
+      TWILIO_PHONE_NUMBER: ${TWILIO_PHONE_NUMBER:-}
+    depends_on:
+      pgbouncer:
+        condition: service_healthy
+      dragonfly:
+        condition: service_started
+    command: ["pnpm", "worker:tracking"]
+    networks:
+      - ninelytics
+
 volumes:
   postgres_data:
   dragonfly_data:

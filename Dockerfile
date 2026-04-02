@@ -37,14 +37,15 @@ COPY --from=builder /app/public ./public
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
 
-# Copy full node_modules + drizzle config for schema push at startup
+# Copy full node_modules + source files for schema push and worker runtime
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/drizzle.config.ts ./drizzle.config.ts
-COPY --from=builder /app/src/server/db ./src/server/db
+COPY --from=builder /app/src ./src
 COPY --from=builder /app/tsconfig.json ./tsconfig.json
+COPY --from=builder /app/scripts ./scripts
 COPY --from=builder /app/scripts/docker-entrypoint.sh ./docker-entrypoint.sh
-RUN chmod +x ./docker-entrypoint.sh
+RUN chmod +x ./docker-entrypoint.sh ./scripts/tracking-worker.ts
 
 # Writable directories for non-root user
 RUN mkdir -p /var/data /app/.next/cache && chown -R nextjs:nodejs /var/data /app/.next

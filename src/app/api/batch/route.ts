@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createRequestContext, processEvent } from '@/lib/collect'
 import { checkRateLimit, RATE_LIMITS } from '@/lib/rate-limiter'
-import type { CollectPayload, CollectResult } from '@/lib/collect'
+import type { CollectPayload } from '@/lib/collect'
+import { isAbortLikeError } from '@/lib/request-errors'
+import { createClientClosedResponse } from '@/lib/tracking-response'
+import { mapWithConcurrency } from '@/lib/promise-pool'
+import { TRACKING_CONFIG } from '@/lib/tracking-config'
+import { enqueueTrackingJob, serializeTrackingRequestContext } from '@/lib/tracking-queue'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -44,28 +49,56 @@ export async function POST(request: NextRequest) {
     }
 
     // Cap batch size to prevent abuse
+    const requested = payloads.length
     const batch = payloads.slice(0, MAX_BATCH_SIZE)
-    const results: CollectResult[] = []
+    const truncated = requested > MAX_BATCH_SIZE
+    const discarded = Math.max(0, requested - batch.length)
     let processed = 0
     let errors = 0
 
-    for (const payload of batch) {
-      try {
-        const result = await processEvent(payload, ctx)
-        results.push(result)
-        if (result.success) processed++
-        else errors++
-      } catch (err) {
-        errors++
-        results.push({ success: false, error: 'Processing failed' })
-      }
+    try {
+      await mapWithConcurrency(batch, TRACKING_CONFIG.batchConcurrency, async (payload) => {
+        await enqueueTrackingJob({
+          kind: 'collect',
+          payload,
+          context: serializeTrackingRequestContext(request.headers),
+        })
+        processed++
+        return null
+      })
+    } catch (queueError) {
+      console.error('Tracking batch enqueue failed, falling back to inline batch:', queueError)
+      processed = 0
+      errors = 0
+
+      await mapWithConcurrency(batch, TRACKING_CONFIG.batchConcurrency, async (payload) => {
+        try {
+          const result = await processEvent(payload, ctx)
+          if (result.success) processed++
+          else errors++
+        } catch {
+          errors++
+        }
+        return null
+      })
     }
 
     return NextResponse.json(
-      { size: batch.length, processed, errors },
+      {
+        requested,
+        processedBatchSize: batch.length,
+        processed,
+        errors,
+        truncated,
+        discarded,
+        maxBatchSize: MAX_BATCH_SIZE,
+      },
       { headers: corsHeaders }
     )
   } catch (error) {
+    if (isAbortLikeError(error)) {
+      return createClientClosedResponse(corsHeaders)
+    }
     console.error('Error in /api/batch:', error)
     return NextResponse.json(
       { error: 'Internal server error' },

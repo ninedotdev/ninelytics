@@ -1,4 +1,4 @@
-import { sleep } from "workflow"
+import { FatalError, RetryableError, getStepMetadata, sleep } from "workflow"
 import crypto from "crypto"
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -72,9 +72,45 @@ async function fetchAndDiffSitemap(websiteId: string, sitemapUrl: string): Promi
   const { websites, sitemapUrls } = await import("@/server/db/schema")
   const { eq } = await import("drizzle-orm")
 
+  const metadata = getStepMetadata()
+
   console.log(`[sitemap] Fetching sitemap: ${sitemapUrl}`)
-  const res = await fetch(sitemapUrl, { cache: "no-store" })
-  if (!res.ok) throw new Error(`Failed to fetch sitemap: ${res.status}`)
+
+  let res: Response
+  try {
+    res = await fetch(sitemapUrl, {
+      cache: "no-store",
+      headers: {
+        Accept: "application/xml,text/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        "User-Agent": "Mozilla/5.0 (compatible; AnaliticsBot/1.0; +https://analitics.app)",
+      },
+      signal: AbortSignal.timeout(20_000),
+    })
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    throw new RetryableError(`Sitemap request failed: ${message}`, {
+      retryAfter: Math.min(metadata.attempt ** 2 * 30_000, 10 * 60_000),
+    })
+  }
+
+  if (!res.ok) {
+    const body = await res.text().catch(() => "")
+    const details = body.replace(/\s+/g, " ").trim().slice(0, 240)
+    const message = `Failed to fetch sitemap: ${res.status}${details ? ` ${details}` : ""}`
+
+    if (res.status === 401 || res.status === 403 || res.status === 404) {
+      throw new FatalError(message)
+    }
+
+    if (res.status === 408 || res.status === 425 || res.status === 429 || res.status >= 500) {
+      throw new RetryableError(message, {
+        retryAfter: Math.min(metadata.attempt ** 2 * 60_000, 15 * 60_000),
+      })
+    }
+
+    throw new Error(message)
+  }
   const xml = await res.text()
 
   const hash = crypto.createHash("md5").update(xml).digest("hex")
@@ -172,7 +208,7 @@ async function loadPendingGoogleUrls(websiteId: string): Promise<string[]> {
       eq(sitemapUrls.googleStatus, "error")
     ))
 
-  const { sql, lte } = await import("drizzle-orm")
+  const { lte } = await import("drizzle-orm")
 
   // Include: never submitted (pending) + submitted but not yet indexed (re-verify after 24h)
   const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()

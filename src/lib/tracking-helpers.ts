@@ -199,3 +199,27 @@ export async function upsertSession(
     throw e
   }
 }
+
+export async function updateSessionMetrics(
+  websiteId: string,
+  sessionId: string,
+  metrics: {
+    duration?: number
+    pageViewCount?: number
+    isBounce?: boolean
+  }
+) {
+  await db
+    .update(visitorSessions)
+    .set({
+      duration: metrics.duration ?? 0,
+      pageViewCount: metrics.pageViewCount ?? 1,
+      isBounce: metrics.isBounce !== undefined ? metrics.isBounce : (metrics.pageViewCount === 1),
+      endTime: toIso(new Date()),
+      updatedAt: toIso(new Date()),
+    })
+    .where(and(
+      eq(visitorSessions.sessionId, sessionId),
+      eq(visitorSessions.websiteId, websiteId)
+    ))
+}

@@ -1,14 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { headers } from 'next/headers'
-import { getGeoLocation } from '@/lib/geolocation'
-import { getClientIp } from '@/lib/get-client-ip'
-import { upsertVisitor, upsertSession } from '@/lib/tracking-helpers'
 import { isBotRequest } from '@/lib/bot-detection'
+import { createRequestContext, processEvent, type CollectPayload } from '@/lib/collect'
 import { isIpBlocked } from '@/lib/ip-filter'
 import { checkRateLimit, RATE_LIMITS } from '@/lib/rate-limiter'
-import { db } from '@/server/db/client'
-import { websites, visitorSessions } from '@/server/db/schema'
-import { eq, and } from 'drizzle-orm'
+import { isAbortLikeError } from '@/lib/request-errors'
+import { createClientClosedResponse } from '@/lib/tracking-response'
+import { enqueueTrackingJob, serializeTrackingRequestContext } from '@/lib/tracking-queue'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -22,21 +19,18 @@ export async function OPTIONS() {
 
 export async function POST(request: NextRequest) {
   try {
-    // Bot detection
     if (isBotRequest(request.headers.get('user-agent'))) {
       return NextResponse.json(null, { status: 404, headers: corsHeaders })
     }
 
-    // IP blocking
     const clientIp = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
       || request.headers.get('x-real-ip') || 'unknown'
     if (isIpBlocked(clientIp)) {
       return NextResponse.json(null, { status: 404, headers: corsHeaders })
     }
 
-    // Rate limiting
     const rateLimitKey = RATE_LIMITS.track.keyGenerator(request)
-    const { allowed, remaining, resetTime } = await checkRateLimit(rateLimitKey, RATE_LIMITS.track)
+    const { allowed, resetTime } = await checkRateLimit(rateLimitKey, RATE_LIMITS.track)
     if (!allowed) {
       const retryAfter = Math.ceil((resetTime - Date.now()) / 1000)
       return NextResponse.json(
@@ -46,139 +40,88 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json()
-    const {
-      trackingCode,
-      visitorId,
-      sessionId,
-      referrer,
-      landingPage,
-      userAgent,
-      browser,
-      os,
-      device,
-      screenResolution,
-      viewport,
-      language,
-      timezone,
-      connection,
-      pixelRatio,
-      cookieEnabled,
-      doNotTrack,
-      utmSource,
-      utmMedium,
-      utmCampaign,
-      utmTerm,
-      utmContent,
-      source,
-      medium,
-      referrerDomain,
-      isSearchEngine,
-      searchEngine,
-      socialNetwork,
-      duration,
-      pageViewCount,
-      isBounce
-    } = body
+    const payload: CollectPayload = {
+      type: 'session',
+      trackingCode: body.trackingCode,
+      visitorId: body.visitorId,
+      sessionId: body.sessionId,
+      referrer: body.referrer,
+      landingPage: body.landingPage,
+      userAgent: body.userAgent,
+      browser: body.browser,
+      os: body.os,
+      device: body.device,
+      screenResolution: body.screenResolution,
+      viewport: body.viewport,
+      language: body.language,
+      timezone: body.timezone,
+      connection: body.connection,
+      pixelRatio: body.pixelRatio,
+      cookieEnabled: body.cookieEnabled,
+      doNotTrack: body.doNotTrack,
+      utmSource: body.utmSource,
+      utmMedium: body.utmMedium,
+      utmCampaign: body.utmCampaign,
+      utmTerm: body.utmTerm,
+      utmContent: body.utmContent,
+      source: body.source,
+      medium: body.medium,
+      referrerDomain: body.referrerDomain,
+      isSearchEngine: body.isSearchEngine,
+      searchEngine: body.searchEngine,
+      socialNetwork: body.socialNetwork,
+      duration: body.duration,
+      pageViewCount: body.pageViewCount,
+      isBounce: body.isBounce,
+    }
 
-    if (!trackingCode || !visitorId || !sessionId) {
+    if (!payload.trackingCode || !payload.visitorId || !payload.sessionId) {
       return NextResponse.json(
         { error: 'Missing required fields' },
         { status: 400, headers: corsHeaders }
       )
     }
 
-    const headersList = await headers()
-    const ipAddress = getClientIp(headersList)
-    const headerUserAgent = headersList.get('user-agent') || 'unknown'
-
-    const websiteRows = await db
-      .select({ id: websites.id })
-      .from(websites)
-      .where(and(eq(websites.trackingCode, trackingCode), eq(websites.status, 'ACTIVE')))
-      .limit(1)
-
-    if (websiteRows.length === 0) {
-      return NextResponse.json(
-        { error: 'Invalid tracking code' },
-        { status: 404, headers: corsHeaders }
-      )
-    }
-
-    const websiteId = websiteRows[0].id
-    const geoData = await getGeoLocation(ipAddress, headersList as unknown as Headers)
-
-    await upsertVisitor(
-      {
-        websiteId,
-        visitorId,
-        ipAddress,
-        userAgent: userAgent || headerUserAgent,
-        browser,
-        os,
-        device,
-        screenResolution,
-        viewport,
-        language,
-        timezone,
-        connection,
-        pixelRatio,
-        cookieEnabled,
-        doNotTrack,
-        country: geoData.country,
-        state: geoData.regionName || geoData.region,
-        city: geoData.city,
-        lat: geoData.lat,
-        lon: geoData.lon,
-      },
-      false,
-      true
-    )
-
-    if (duration !== undefined || isBounce !== undefined || pageViewCount !== undefined) {
-      await db
-        .update(visitorSessions)
-        .set({
-          duration: duration ?? 0,
-          pageViewCount: pageViewCount ?? 1,
-          isBounce: isBounce !== undefined ? isBounce : (pageViewCount === 1),
-          endTime: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        })
-        .where(and(
-          eq(visitorSessions.sessionId, sessionId),
-          eq(visitorSessions.websiteId, websiteId)
-        ))
+    try {
+      await enqueueTrackingJob({
+        kind: 'collect',
+        payload,
+        context: serializeTrackingRequestContext(request.headers),
+      })
 
       return NextResponse.json(
-        { success: true, updated: true },
+        {
+          success: true,
+          queued: true,
+          updated: payload.duration !== undefined || payload.isBounce !== undefined || payload.pageViewCount !== undefined,
+        },
         { headers: corsHeaders }
       )
+    } catch (queueError) {
+      console.error('Tracking session enqueue failed, falling back to inline processing:', queueError)
     }
 
-    const session = await upsertSession({
-      websiteId,
-      visitorId,
-      sessionId,
-      referrer,
-      landingPage,
-      utmSource,
-      utmMedium,
-      utmCampaign,
-      utmTerm,
-      utmContent,
-      source,
-      medium,
-      referrerDomain,
-      isSearchEngine,
-      searchEngine,
-      socialNetwork,
-    })
+    const ctx = createRequestContext(request)
+    if (!ctx) {
+      return NextResponse.json(null, { status: 404, headers: corsHeaders })
+    }
+
+    const result = await processEvent(payload, ctx)
+    if (!result.success) {
+      return NextResponse.json(
+        { error: result.error ?? 'Internal server error' },
+        { status: 400, headers: corsHeaders }
+      )
+    }
 
     return NextResponse.json(
-      { success: true, id: session?.id },
+      { success: true, id: result.id, updated: result.updated },
       { headers: corsHeaders }
     )
   } catch (error) {
+    if (isAbortLikeError(error)) {
+      return createClientClosedResponse(corsHeaders)
+    }
     console.error('Error tracking session:', error)
     return NextResponse.json(
       { error: 'Internal server error' },

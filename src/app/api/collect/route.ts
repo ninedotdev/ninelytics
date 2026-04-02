@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createRequestContext, processEvent } from '@/lib/collect'
 import { checkRateLimit, RATE_LIMITS } from '@/lib/rate-limiter'
 import type { CollectPayload } from '@/lib/collect'
+import { isAbortLikeError } from '@/lib/request-errors'
+import { createClientClosedResponse } from '@/lib/tracking-response'
+import { enqueueTrackingJob, serializeTrackingRequestContext } from '@/lib/tracking-queue'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -40,6 +43,21 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    try {
+      await enqueueTrackingJob({
+        kind: 'collect',
+        payload,
+        context: serializeTrackingRequestContext(request.headers),
+      })
+
+      return NextResponse.json(
+        { success: true, queued: true },
+        { headers: corsHeaders }
+      )
+    } catch (queueError) {
+      console.error('Tracking queue enqueue failed, falling back to inline collect:', queueError)
+    }
+
     const result = await processEvent(payload, ctx)
 
     if (!result.success) {
@@ -51,6 +69,9 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json(result, { headers: corsHeaders })
   } catch (error) {
+    if (isAbortLikeError(error)) {
+      return createClientClosedResponse(corsHeaders)
+    }
     console.error('Error in /api/collect:', error)
     return NextResponse.json(
       { error: 'Internal server error' },
