@@ -1,21 +1,15 @@
 /**
- * JWT sign/verify using HS256 + NEXTAUTH_SECRET.
- *
- * We keep the same env var as NextAuth for continuity — users configured
- * NEXTAUTH_SECRET in Coolify already. JWT_SECRET wins if both are set so
- * we can rotate independently later.
+ * JWT sign/verify using HS256 + SESSION_SECRET.
  */
 import { SignJWT, jwtVerify } from 'jose'
 
-const SECRET_ENV = process.env.JWT_SECRET ?? process.env.NEXTAUTH_SECRET
-if (!SECRET_ENV) {
-  // Not a hard throw at import — the db fallback pattern is to fail lazily.
-  console.warn('[auth] neither JWT_SECRET nor NEXTAUTH_SECRET is set')
+if (!process.env.SESSION_SECRET) {
+  console.warn('[auth] SESSION_SECRET is not set')
 }
 
 function getSecret(): Uint8Array {
-  const s = process.env.JWT_SECRET ?? process.env.NEXTAUTH_SECRET
-  if (!s) throw new Error('JWT_SECRET / NEXTAUTH_SECRET is not set')
+  const s = process.env.SESSION_SECRET
+  if (!s) throw new Error('SESSION_SECRET is not set')
   return new TextEncoder().encode(s)
 }
 

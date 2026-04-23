@@ -242,10 +242,8 @@ Copy `.env.example` to `.env` and fill in the values:
 # ─── Required ───
 DATABASE_URL="postgresql://user:password@localhost:5432/analytics"
 REDIS_URL="redis://localhost:6379"
-NEXTAUTH_URL="http://localhost:3000"
-NEXTAUTH_SECRET="generate-a-random-secret"
-JWT_SECRET="generate-a-random-secret"
-NEXT_PUBLIC_APP_URL="http://localhost:3000"
+SESSION_SECRET="generate-a-random-secret"
+APP_URL="http://localhost:3000"
 
 # ─── AI Models (at least one required for AI Insights) ───
 OPENAI_API_KEY=""           # GPT-5.4, GPT-5.3, GPT-5.4 Mini
@@ -468,7 +466,7 @@ The included `docker-compose.yml` runs **six services**: `postgres`, `pgbouncer`
 ```bash
 # 1. Copy and configure environment
 cp docker.env.example .env
-# Edit .env — set at minimum: DB_PASSWORD, NEXTAUTH_SECRET, APP_URL
+# Edit .env — set at minimum: DB_PASSWORD, SESSION_SECRET, APP_URL
 
 # 2. Start everything
 docker compose up -d
@@ -503,7 +501,7 @@ Healthchecks are aggressive (3 s interval on `web`, start_period 90 s on `api`) 
 3. In **Docker Compose Location**, enter `docker-compose.yml`
 4. Point your FQDN at the `web` service (port 3000). The `/api/*` proxy is built into `web/server-prod.js`, so a single hostname covers the frontend and all API endpoints.
 5. Add environment variables in the Coolify UI — see `docker.env.example` for the full list. Minimum:
-   - `DB_PASSWORD`, `NEXTAUTH_SECRET`, `APP_URL`
+   - `DB_PASSWORD`, `SESSION_SECRET`, `APP_URL`
    - Optional: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_AI_API_KEY` (AI Insights), `MAXMIND_LICENSE_KEY` (geo maps), `RESEND_API_KEY` / `TWILIO_*` (uptime alerts), `GOOGLE_API_CLIENT_ID` + `GOOGLE_API_CLIENT_SECRET` (GA4 + Search Console).
 6. Deploy — Coolify builds the images, runs drizzle-kit push during api startup, and starts serving.
 

@@ -45,7 +45,7 @@ export async function sendTelegramMessage(
       }
     }
 
-    lines.push(``, `[View Dashboard](${process.env.NEXT_PUBLIC_APP_URL})`)
+    lines.push(``, `[View Dashboard](${process.env.APP_URL})`)
 
     await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
       method: "POST",

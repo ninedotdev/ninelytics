@@ -73,11 +73,8 @@ services:
       DB_PASSWORD: ${DB_PASSWORD}
       DATABASE_URL: postgresql://${DB_USER:-postgres}:${DB_PASSWORD}@pgbouncer:6432/${DB_NAME:-ninelytics}
       REDIS_URL: redis://dragonfly:6379
-      # Keep NEXTAUTH_SECRET as the source of truth so existing secrets
-      # migrate cleanly. JWT_SECRET is an optional override.
-      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:?Set NEXTAUTH_SECRET in .env}
-      JWT_SECRET: ${JWT_SECRET:-${NEXTAUTH_SECRET}}
-      NEXT_PUBLIC_APP_URL: ${APP_URL:-http://localhost:3001}
+      SESSION_SECRET: ${SESSION_SECRET:?Set SESSION_SECRET in .env}
+      APP_URL: ${APP_URL:-http://localhost:3001}
       IS_MULTI_TENANT: ${IS_MULTI_TENANT:-false}
       # AI
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
@@ -128,9 +125,8 @@ services:
     environment:
       DATABASE_URL: postgresql://${DB_USER:-postgres}:${DB_PASSWORD}@pgbouncer:6432/${DB_NAME:-ninelytics}
       REDIS_URL: redis://dragonfly:6379
-      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:?Set NEXTAUTH_SECRET in .env}
-      JWT_SECRET: ${JWT_SECRET:-${NEXTAUTH_SECRET}}
-      NEXT_PUBLIC_APP_URL: ${APP_URL:-http://localhost:3001}
+      SESSION_SECRET: ${SESSION_SECRET:?Set SESSION_SECRET in .env}
+      APP_URL: ${APP_URL:-http://localhost:3001}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       GOOGLE_AI_API_KEY: ${GOOGLE_AI_API_KEY:-}
@@ -175,7 +171,7 @@ services:
       NODE_ENV: production
       # Internal-network address for SSR fetches to the Hono API.
       API_URL: http://api:3001
-      NEXT_PUBLIC_APP_URL: ${APP_URL:-http://localhost:3000}
+      APP_URL: ${APP_URL:-http://localhost:3000}
     expose:
       - "3000"
     depends_on:

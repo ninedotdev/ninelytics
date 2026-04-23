@@ -49,7 +49,7 @@ export async function sendUptimeEmail(to: string, payload: UptimeEmailPayload) {
         downtimeDuration: payload.downtimeDuration
           ? payload.downtimeDuration
           : undefined,
-        dashboardUrl: process.env.NEXT_PUBLIC_APP_URL || "https://localhost:3000",
+        dashboardUrl: process.env.APP_URL || "https://localhost:3000",
       }),
     })
   } catch (error) {

@@ -47,13 +47,10 @@ redis.on('close', () => {
   isRedisConnected = false
 })
 
-// Connect to Redis — skip during build phase (no Redis available)
-if (process.env.NEXT_PHASE !== 'phase-production-build') {
-  redis.connect().catch((err) => {
-    console.error('Failed to connect to Redis:', err.message)
-    isRedisConnected = false
-  })
-}
+redis.connect().catch((err) => {
+  console.error('Failed to connect to Redis:', err.message)
+  isRedisConnected = false
+})
 
 // Real-time analytics keys
 export const REALTIME_KEYS = {

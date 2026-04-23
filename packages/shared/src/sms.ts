@@ -17,8 +17,9 @@ export async function sendUptimeSms(phoneNumber: string, payload: UptimeSmsPaylo
     const twilio = await import("twilio")
     const client = twilio.default(sid, token)
 
+    const appUrl = process.env.APP_URL
     const messages: Record<string, string> = {
-      down: `🔴 ${payload.websiteName} is DOWN. ${payload.result.issues[0] ?? "Not responding"}. Check: ${process.env.NEXT_PUBLIC_APP_URL}`,
+      down: `🔴 ${payload.websiteName} is DOWN. ${payload.result.issues[0] ?? "Not responding"}. Check: ${appUrl}`,
       recovered: `🟢 ${payload.websiteName} is back ONLINE.${payload.downtimeDuration ? ` Downtime: ${payload.downtimeDuration}.` : ""}`,
       degraded: `🟡 ${payload.websiteName} is SLOW. Response: ${payload.result.responseTime}ms.`,
       ssl: `🔒 ${payload.websiteName} SSL expires in ${payload.result.sslExpiryDays} days. Renew soon.`,

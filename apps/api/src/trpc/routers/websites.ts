@@ -163,7 +163,7 @@ export const websitesRouter = router({
 
   create: protectedProcedure.input(createWebsiteSchema).mutation(async ({ ctx, input }) => {
     const trackingCode = `ANA_${nanoid(8).toUpperCase()}`
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL || "https://your-analytics-domain.com"
+    const appUrl = process.env.APP_URL || "https://your-analytics-domain.com"
     const trackingScript = `<!-- Analytics Tracking Script -->\n<script src="${appUrl}/analytics.js" data-tracking-code="${trackingCode}" defer></script>`
 
     const [website] = await ctx.db
