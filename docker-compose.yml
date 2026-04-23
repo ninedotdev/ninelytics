@@ -60,63 +60,77 @@ services:
     networks:
       - ninelytics
 
-  app:
+  api:
     build:
       context: .
-      dockerfile: Dockerfile
-    # Or use pre-built image:
-    # image: ghcr.io/the9thave/ninelytics:latest
+      dockerfile: apps/api/Dockerfile
     restart: unless-stopped
     environment:
-      # ─── Core (auto-wired to pgbouncer + dragonfly) ───
+      # entrypoint uses these raw creds to talk to postgres directly
+      # (drizzle-kit push + timescale setup). Runtime uses pgbouncer.
+      DB_NAME: ${DB_NAME:-ninelytics}
+      DB_USER: ${DB_USER:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD}
       DATABASE_URL: postgresql://${DB_USER:-postgres}:${DB_PASSWORD}@pgbouncer:6432/${DB_NAME:-ninelytics}
       REDIS_URL: redis://dragonfly:6379
+      # Keep NEXTAUTH_SECRET as the source of truth so existing secrets
+      # migrate cleanly. JWT_SECRET is an optional override.
       NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:?Set NEXTAUTH_SECRET in .env}
-      NEXTAUTH_URL: ${APP_URL:-http://localhost:3000}
       JWT_SECRET: ${JWT_SECRET:-${NEXTAUTH_SECRET}}
-      NEXT_PUBLIC_APP_URL: ${APP_URL:-http://localhost:3000}
-      # ─── AI Models (optional — at least one for AI Insights) ───
+      NEXT_PUBLIC_APP_URL: ${APP_URL:-http://localhost:3001}
+      IS_MULTI_TENANT: ${IS_MULTI_TENANT:-false}
+      # AI
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       GOOGLE_AI_API_KEY: ${GOOGLE_AI_API_KEY:-}
-      # ─── Google OAuth (optional — for GA4 + Search Console) ───
+      # Google OAuth (GA4 + Search Console integrations)
       GOOGLE_API_CLIENT_ID: ${GOOGLE_API_CLIENT_ID:-}
       GOOGLE_API_CLIENT_SECRET: ${GOOGLE_API_CLIENT_SECRET:-}
-      # ─── GeoIP (optional — for visitor maps) ───
+      # GeoIP
       MAXMIND_LICENSE_KEY: ${MAXMIND_LICENSE_KEY:-}
       MAXMIND_DB_PATH: /var/data/GeoLite2-City.mmdb
-      # ─── Uptime Notifications (optional) ───
+      # Notifications
       RESEND_API_KEY: ${RESEND_API_KEY:-}
       RESEND_FROM_EMAIL: ${RESEND_FROM_EMAIL:-}
       TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID:-}
       TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN:-}
       TWILIO_PHONE_NUMBER: ${TWILIO_PHONE_NUMBER:-}
-      # ─── Seed ───
-      SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL:-admin@localhost}
-      SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-admin}
     expose:
-      - "3000"
+      - "3001"
     depends_on:
       pgbouncer:
         condition: service_healthy
+      postgres:
+        condition: service_healthy
       dragonfly:
         condition: service_started
-    command: ["sh", "/app/docker-entrypoint.sh"]
+    volumes:
+      - maxmind_data:/var/data
+    healthcheck:
+      # start_period bumped to 90s so the drizzle-kit push in the entrypoint
+      # has time to run before healthcheck failures count. Post-migrate the
+      # /api/health response is ~1ms.
+      test: ["CMD-SHELL", "wget -qO- --timeout=3 http://localhost:3001/api/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 90s
+    mem_limit: 1536m
+    mem_reservation: 512m
     networks:
       - ninelytics
 
   worker:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: apps/worker/Dockerfile
     restart: unless-stopped
     environment:
       DATABASE_URL: postgresql://${DB_USER:-postgres}:${DB_PASSWORD}@pgbouncer:6432/${DB_NAME:-ninelytics}
       REDIS_URL: redis://dragonfly:6379
       NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:?Set NEXTAUTH_SECRET in .env}
-      NEXTAUTH_URL: ${APP_URL:-http://localhost:3000}
       JWT_SECRET: ${JWT_SECRET:-${NEXTAUTH_SECRET}}
-      NEXT_PUBLIC_APP_URL: ${APP_URL:-http://localhost:3000}
+      NEXT_PUBLIC_APP_URL: ${APP_URL:-http://localhost:3001}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       GOOGLE_AI_API_KEY: ${GOOGLE_AI_API_KEY:-}
@@ -130,17 +144,71 @@ services:
       TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN:-}
       TWILIO_PHONE_NUMBER: ${TWILIO_PHONE_NUMBER:-}
     depends_on:
+      api:
+        # worker waits for api to be healthy — by then migrations have run
+        # (api entrypoint does drizzle-kit push before /api/health is up).
+        condition: service_healthy
       pgbouncer:
         condition: service_healthy
       dragonfly:
         condition: service_started
-    command: ["pnpm", "worker:tracking"]
+    volumes:
+      - maxmind_data:/var/data
+    healthcheck:
+      # Worker has no HTTP endpoint — success = Node process is alive.
+      test: ["CMD-SHELL", "pgrep -f 'bun run src/index.ts' > /dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    mem_limit: 1g
+    mem_reservation: 256m
     networks:
       - ninelytics
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      # Internal-network address for SSR fetches to the Hono API.
+      API_URL: http://api:3001
+      NEXT_PUBLIC_APP_URL: ${APP_URL:-http://localhost:3000}
+    expose:
+      - "3000"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      # /_health bypasses SSR. Interval aggressive so post-deploy the
+      # container flips to 'healthy' in ~3-5s and Traefik routes again.
+      # Without this the default 60s start_period + 30s interval meant
+      # ~90s of 504s after every deploy.
+      test: ["CMD-SHELL", "wget -qO- --timeout=2 http://localhost:3000/_health || exit 1"]
+      interval: 3s
+      timeout: 2s
+      retries: 3
+      start_period: 10s
+    mem_limit: 1g
+    mem_reservation: 256m
+    networks:
+      - ninelytics
+
+  # Frontend placeholder — replaced in Phase 7 with TanStack Start.
+  # Commented out for now so Coolify doesn't try to build a nonexistent app.
+  #
+  # web:
+  #   build:
+  #     context: .
+  #     dockerfile: apps/web/Dockerfile
+  #   ...
 
 volumes:
   postgres_data:
   dragonfly_data:
+  maxmind_data:
 
 networks:
   ninelytics:

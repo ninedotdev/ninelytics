@@ -1,0 +1,36 @@
+{
+  "name": "@ninelytics/api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./router-type": "./src/trpc/router-type.ts"
+  },
+  "scripts": {
+    "dev": "bun run --hot src/index.ts",
+    "start": "bun run src/index.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@ai-sdk/anthropic": "^3.0.71",
+    "@ai-sdk/google": "^3.0.64",
+    "@ai-sdk/openai": "^3.0.53",
+    "ai": "^6.0.168",
+    "@ninelytics/db": "workspace:*",
+    "@ninelytics/shared": "workspace:*",
+    "@trpc/server": "^11.16.0",
+    "bcryptjs": "^2.4.3",
+    "jose": "^5.10.0",
+    "date-fns": "^4.1.0",
+    "drizzle-orm": "^0.45.2",
+    "hono": "^4.10.7",
+    "nanoid": "^5.1.9",
+    "superjson": "^2.2.6",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "@types/bun": "latest",
+    "typescript": "^6.0.3"
+  }
+}

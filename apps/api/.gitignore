@@ -1,0 +1,11 @@
+node_modules/
+dist/
+build/
+.turbo/
+.cache/
+*.tsbuildinfo
+.env
+.env.local
+.env.*.local
+bun.lockb
+*.log

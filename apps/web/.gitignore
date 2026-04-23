@@ -1,0 +1,15 @@
+node_modules/
+.output/
+.nitro/
+.tanstack/
+dist/
+build/
+.turbo/
+.cache/
+*.tsbuildinfo
+.env
+.env.local
+.env.*.local
+bun.lockb
+*.log
+src/routeTree.gen.ts

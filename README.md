@@ -1,6 +1,8 @@
 # Ninelytics
 
-A self-hosted, privacy-first web analytics platform built with Next.js. Track pageviews, events, sessions, and conversions across multiple websites from a single dashboard — with real-time data, AI-powered insights, geo-location maps, custom reports, and goal tracking.
+A self-hosted, privacy-first web analytics platform. Track pageviews, events, sessions, and conversions across multiple websites from a single dashboard — with real-time data, AI-powered insights, geo-location maps, custom reports, and goal tracking.
+
+Built on a **Bun + Hono + TanStack Start** monorepo: a thin Hono API for high-throughput ingest and tRPC, a dedicated Bun worker for the tracking queue and scheduled jobs, and a TanStack Start frontend.
 
 ![Dashboard](public/repo/dashboard.png)
 
@@ -79,83 +81,138 @@ All imports use source-specific prefixes (`import-cf-`, `import-ga-`, `import-ph
 
 ## Tech Stack
 
-| Layer                 | Technology                                                                                                                                                            |
-| --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Framework             | [Next.js 16](https://nextjs.org) (App Router, Turbopack)                                                                                                              |
-| Language              | TypeScript 6 (strict)                                                                                                                                                 |
-| API                   | [tRPC v11](https://trpc.io) + [TanStack Query v5](https://tanstack.com/query)                                                                                         |
-| Database              | PostgreSQL 17 + [TimescaleDB](https://www.timescale.com) via [Drizzle ORM](https://orm.drizzle.team) — hypertables auto-partition time-series tables for fast queries at scale |
-| Cache / Rate limiting | Redis via [ioredis](https://github.com/redis/ioredis)                                                                                                                 |
-| Auth                  | [NextAuth.js v4](https://next-auth.js.org) with Drizzle adapter                                                                                                       |
-| UI Components         | [shadcn/ui](https://ui.shadcn.com) + [Radix UI](https://www.radix-ui.com) primitives                                                                                  |
-| Icons                 | [Tabler Icons](https://tabler.io/icons)                                                                                                                               |
-| Styling               | [Tailwind CSS v4](https://tailwindcss.com)                                                                                                                            |
-| Charts                | Custom visx-based charts (Area, Bar, Ring) + [Recharts](https://recharts.org) sparklines                                                                              |
-| Maps                  | [MapLibre GL](https://maplibre.org) + [MapCN](https://www.mapcn.dev) tiles + [MaxMind GeoIP2](https://www.maxmind.com)                                                |
-| AI                    | [OpenAI](https://platform.openai.com) (GPT-5.4), [Anthropic](https://anthropic.com) (Claude Sonnet/Opus 4.6), [Google](https://ai.google.dev) (Gemini 3.1 Flash Lite) |
-| Forms                 | [React Hook Form](https://react-hook-form.com) + [Zod](https://zod.dev) validation                                                                                    |
-| State                 | [Zustand](https://zustand-demo.pmnd.rs) + [SWR](https://swr.vercel.app)                                                                                               |
-| Deployment            | [Coolify](https://coolify.io) (self-hosted)                                                                                                                           |
+| Layer                 | Technology                                                                                                                                                                       |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Runtime               | [Bun 1.3](https://bun.com) — both API and worker run on native Bun                                                                                                               |
+| API                   | [Hono 4](https://hono.dev) — ingest + `/api/auth` + `/api/trpc` mounted in one Bun.serve                                                                                         |
+| Frontend              | [TanStack Start](https://tanstack.com/start) + [TanStack Router](https://tanstack.com/router) (file-based, SSR, typed search params) with a Bun wrapper serving static + SSR + `/api/*` proxy |
+| Language              | TypeScript 6 (strict)                                                                                                                                                            |
+| Typed RPC             | [tRPC v11](https://trpc.io) + [TanStack Query v5](https://tanstack.com/query) — 26 routers shared via `workspace:*` type export                                                  |
+| Database              | PostgreSQL 17 + [TimescaleDB](https://www.timescale.com) via [Drizzle ORM](https://orm.drizzle.team) — hypertables auto-partition time-series tables for fast queries at scale   |
+| Connection pool       | [PgBouncer](https://www.pgbouncer.org) in transaction mode (20 pool, 1000 max clients)                                                                                           |
+| Cache / Queue         | [Dragonfly](https://www.dragonflydb.io) (Redis-compatible, 25x faster) — real-time, rate limits, tracking queue, workflow queue                                                  |
+| Auth                  | JWT sessions (HS256 via [jose](https://github.com/panva/jose)) + bcryptjs — a ~200-line Hono module on the `users` table, no NextAuth                                            |
+| UI Components         | [shadcn/ui](https://ui.shadcn.com) + [Radix UI](https://www.radix-ui.com) primitives + [base-ui](https://base-ui.com)                                                            |
+| Icons                 | [Tabler Icons](https://tabler.io/icons) + [Lucide](https://lucide.dev)                                                                                                           |
+| Styling               | [Tailwind CSS v4](https://tailwindcss.com) + `tw-animate-css`                                                                                                                    |
+| Toasts                | [sileo](https://www.npmjs.com/package/sileo)                                                                                                                                     |
+| Charts                | Custom visx-based charts (Area, Bar, Ring) + [Recharts](https://recharts.org) sparklines                                                                                         |
+| Maps                  | [MapLibre GL](https://maplibre.org) + [MapCN](https://www.mapcn.dev) tiles + [MaxMind GeoIP2](https://www.maxmind.com)                                                           |
+| AI                    | [OpenAI](https://platform.openai.com) (GPT-5.4), [Anthropic](https://anthropic.com) (Claude Sonnet/Opus 4.6), [Google](https://ai.google.dev) (Gemini 3.1 Flash Lite)            |
+| Forms                 | [React Hook Form](https://react-hook-form.com) + [Zod](https://zod.dev) validation                                                                                               |
+| Theme                 | [next-themes](https://github.com/pacocoursey/next-themes) (runtime-agnostic despite the name)                                                                                    |
+| Build                 | [Vite 7](https://vitejs.dev) + [Rollup 4](https://rollupjs.org) for the frontend; Bun's runtime TS for api + worker                                                              |
+| Linter                | [oxlint](https://oxc.rs) — Rust-based, catches `no-undef` type bugs before they hit production                                                                                   |
+| Deployment            | Docker Compose → [Coolify](https://coolify.io) with Traefik v3                                                                                                                   |
 
 ---
 
 ## Project Structure
 
+pnpm workspaces monorepo. Three deployable apps share two internal packages:
+
 ```
-src/
-├── app/
-│   ├── dashboard/          # Main overview with geo map
-│   ├── analytics/          # Pageviews, sessions, events breakdown
-│   ├── realtime/           # Live visitor feed
-│   ├── websites/           # Website management + per-site settings
-│   ├── custom-reports/     # Builder + saved reports
-│   ├── goals/              # Conversion goal tracking
-│   ├── ai/                 # AI-powered data Q&A
-│   ├── users/              # User & team management
-│   ├── settings/           # Account settings + integrations
-│   └── api/
-│       ├── trpc/           # tRPC handler
-│       ├── track/          # Tracking endpoints (pageview, event, session, conversion)
-│       ├── batch/          # Batch event collection
-│       ├── google/         # Google OAuth flow (auth + callback)
-│       └── websites/config # Public config endpoint (excluded paths + consent)
-├── server/
-│   ├── db/
-│   │   ├── schema.ts       # Drizzle schema (users, websites, events, sessions, search_console_data, stripe_data…)
-│   │   └── client.ts       # Drizzle + postgres client
-│   └── api/
-│       └── routers/
-│           ├── websites.ts           # Core website CRUD + stats
-│           ├── analytics.ts          # Analytics overview, pages, devices, traffic
-│           ├── integrations/         # Integration routers (one per service)
-│           │   ├── cloudflare.ts     # CF import (import-cf-*)
-│           │   ├── google-analytics.ts # GA4 import + OAuth (import-ga-*)
-│           │   ├── search-console.ts # Search Console import
-│           │   ├── stripe.ts        # Stripe revenue import
-│           │   └── posthog.ts       # PostHog import (import-ph-*)
-│           └── helpers/
-│               └── ensure-access.ts  # Shared website access check
-├── lib/
-│   ├── cloudflare-analytics.ts  # CF GraphQL API client
-│   ├── google-analytics.ts      # GA4 Data API client
-│   ├── google-oauth.ts          # Google OAuth token management
-│   ├── search-console.ts        # Search Console API client
-│   ├── stripe-api.ts            # Stripe API client (read-only)
-│   ├── posthog-api.ts           # PostHog HogQL Query API client
-│   ├── country-names.ts         # Country ISO ↔ name normalization
-│   ├── geolocation.ts           # GeoIP (MaxMind + ip-api fallback)
-│   ├── timezone.ts              # Timezone SQL helpers
-│   └── export-helpers.ts        # CSV/JSON/Excel export
-├── hooks/
-│   └── use-timezone.ts          # Client timezone detection
-├── components/
-│   ├── ui/                 # shadcn + custom primitives (map, charts…)
-│   ├── icons/              # Brand icons (Cloudflare, GA, Google, Stripe, PostHog)
-│   ├── analytics/          # Advanced filters
-│   └── layout/             # App shell, sidebar, nav
-└── public/
-    └── analytics.js        # Client tracking script + consent banner
+apps/
+├── api/                          # Hono + Bun — HTTP surface (port 3001)
+│   ├── src/
+│   │   ├── index.ts              # Bun.serve entry: CORS, heartbeats, route mounts
+│   │   ├── routes/               # Hono route modules
+│   │   │   ├── collect.ts        # POST /api/collect — main tracker ingest (queue-first)
+│   │   │   ├── batch.ts          # POST /api/batch — 25-event batch
+│   │   │   ├── track/            # /api/track/{pageview,event,session,conversion}
+│   │   │   ├── vitals.ts         # POST /api/vitals — Web Vitals (LCP/FCP/INP/CLS/TTFB)
+│   │   │   ├── websites-config.ts # GET /api/websites/config/:trackingCode
+│   │   │   ├── health.ts         # GET /api/health
+│   │   │   ├── auth.ts           # /api/auth/{signin,signout,session,signup}
+│   │   │   ├── trpc.ts           # /api/trpc/* via @trpc/server/adapters/fetch
+│   │   │   └── ai-chat.ts        # POST /api/ai-chat — streaming OpenAI/Anthropic/Google
+│   │   ├── lib/
+│   │   │   ├── session.ts        # getSession(req) — JWT cookie → users row
+│   │   │   ├── jwt.ts            # jose HS256 sign/verify
+│   │   │   ├── cookies.ts        # httpOnly + SameSite cookie helpers
+│   │   │   └── rate-limit-mw.ts  # Hono middleware (fail-open on Redis outage)
+│   │   ├── trpc/
+│   │   │   ├── trpc.ts           # initTRPC, context, protected/public procedures
+│   │   │   ├── root.ts           # appRouter — merges 26 subrouters
+│   │   │   └── routers/          # one per domain: analytics, websites, goals,
+│   │   │       └── integrations/ # cloudflare, google-analytics, search-console,
+│   │   │                         # stripe, posthog
+│   │   └── workflows/            # sitemap-indexing + uptime-monitor helpers
+│   └── Dockerfile                # node:alpine install → bun:alpine runtime
+│
+├── worker/                       # Bun — background consumer
+│   ├── src/
+│   │   ├── index.ts              # BRPOP loops + graceful shutdown
+│   │   ├── scheduler.ts          # setInterval: uptime scan (5m) + sitemap poll (6h)
+│   │   └── workflows/
+│   │       ├── uptime.ts         # runUptimeCheckForSite + scanEnabledUptimeSites
+│   │       └── sitemap.ts        # runSitemapPollForSite + scanAutoIndexSites
+│   └── Dockerfile
+│
+├── web/                          # TanStack Start + Vite 7
+│   ├── src/
+│   │   ├── client.tsx            # hydrateRoot + StartClient (explicit — avoids a
+│   │   │                         # TanStack Start codegen bug where React.*
+│   │   │                         # references didn't survive minification)
+│   │   ├── router.tsx            # getRouter() — QueryClient + tRPC provider wrap
+│   │   ├── routes/               # file-based: _app.* is the authed layout,
+│   │   │   │                     # _app.<name>.tsx + _app.<name>.index.tsx pattern
+│   │   │   │                     # when a path is both a parent and a leaf
+│   │   │   ├── __root.tsx        # <html> + ThemeProvider + Toaster
+│   │   │   ├── _app.tsx          # auth guard + sidebar + header
+│   │   │   ├── auth.signin.tsx
+│   │   │   ├── _app.dashboard.tsx, _app.realtime.tsx, _app.analytics.tsx,
+│   │   │   ├── _app.goals.tsx, _app.users.tsx, _app.admin.tsx, _app.ai.tsx,
+│   │   │   ├── _app.settings.tsx, _app.speed-insights.tsx, _app.docs.tsx,
+│   │   │   ├── _app.reports.tsx, _app.custom-reports.tsx,
+│   │   │   └── _app.websites.* (index, new, $id, $id.settings)
+│   │   ├── components/
+│   │   │   ├── ui/               # shadcn/base-ui primitives
+│   │   │   ├── layout/           # AppLayout + AppSidebar + Header
+│   │   │   ├── auth/             # SignInForm + SignUpForm
+│   │   │   ├── charts/           # visx Area/Bar/Ring + tooltips
+│   │   │   ├── ai-elements/      # Conversation, Message, Reasoning, …
+│   │   │   └── icons/            # CF, GA, Google, Stripe, PostHog, Telegram
+│   │   └── lib/
+│   │       ├── trpc.ts           # createTRPCReact<AppRouter> (type from apps/api)
+│   │       ├── auth.ts           # useSession / useSignIn / useSignOut
+│   │       └── export-helpers.ts # CSV/JSON/Excel
+│   ├── server-prod.js            # Bun wrapper: static assets + /_health + /api/* proxy + SSR
+│   └── Dockerfile
+│
+packages/
+├── db/                           # @ninelytics/db — Drizzle schema + createDb() factory
+│   └── src/{schema.ts,client.ts}
+└── shared/                       # @ninelytics/shared — runtime-agnostic utilities
+    └── src/
+        ├── db.ts                 # Lazy Proxy singleton around @ninelytics/db
+        ├── collect.ts            # Runtime-agnostic processEvent pipeline
+        ├── rate-limiter.ts       # Redis INCR + expire
+        ├── tracking-queue.ts     # BRPOP/LPUSH wrapper for tracking:jobs
+        ├── workflow-queue.ts     # Same pattern for jobs:workflow (ad-hoc triggers)
+        ├── tracking-helpers.ts   # upsertVisitor / upsertSession / updateSessionMetrics
+        ├── tracking-conversion.ts # Goal matching + conversion insert
+        ├── geolocation.ts        # MaxMind + ip-api.com fallback (bounded LRU cache)
+        ├── redis.ts              # ioredis client + realtime helpers
+        ├── bot-detection.ts      # isbot
+        ├── ip-filter.ts          # IP denylist from env
+        ├── maxmind-updater.ts    # Downloads GeoLite2-City.mmdb on boot
+        ├── cloudflare-analytics.ts, google-analytics.ts, google-oauth.ts,
+        │   search-console.ts, stripe-api.ts, posthog-api.ts — integration clients
+        ├── telegram.ts, email.ts (Resend), sms.ts (Twilio) — notifications
+        ├── ai-service.ts         # OpenAI insights + cache
+        ├── ai-analytics.ts       # Anomaly detection + predictions + recommendations
+        └── emails/uptime-alert.tsx # React Email template
+
+scripts/
+└── api-entrypoint.sh             # drizzle-kit push + TimescaleDB hypertable setup,
+                                  # then execs the api. Replaces the old db-migrate one-shot.
+
+docker-compose.yml                # postgres + pgbouncer + dragonfly + api + worker + web
+drizzle.config.ts                 # points at packages/db/src/schema.ts
 ```
+
+`apps/web` depends on `@ninelytics/api` only for the **type** of `AppRouter` — tRPC procedure types flow to the frontend at zero runtime cost. No server code ever ends up in the client bundle.
 
 ---
 
@@ -163,17 +220,18 @@ src/
 
 ### Prerequisites
 
-- Node.js 20+
-- pnpm
-- PostgreSQL
-- Redis
+- [Bun](https://bun.com) 1.3+ (runtime for api + worker + web build output)
+- [Node.js](https://nodejs.org) 22+ (used only to run `pnpm install` — Bun can run everything else)
+- [pnpm](https://pnpm.io) 10+ (workspace manager)
+- PostgreSQL 17 with the [TimescaleDB](https://www.timescale.com) extension
+- Redis / Dragonfly
 
 ### Installation
 
 ```bash
 git clone https://github.com/ninedotdev/ninelytics.git
 cd ninelytics
-pnpm install
+pnpm install     # hydrates all workspaces (apps/* + packages/*)
 ```
 
 ### Environment Variables
@@ -225,20 +283,28 @@ MAXMIND_DB_PATH="/var/data/GeoLite2-City.mmdb"
 ### Database Setup
 
 ```bash
-# Push schema to database
+# Push schema to the database (drizzle-kit reads packages/db/src/schema.ts)
 pnpm drizzle:push
-
-# Seed initial data
-pnpm db:seed
 ```
+
+The first time the api container boots, `scripts/api-entrypoint.sh` also runs `drizzle-kit push` + the TimescaleDB hypertable setup automatically — so in Docker deploys you don't need to run this manually.
 
 ### Development
 
+Run each app in its own terminal so they can hot-reload independently:
+
 ```bash
-pnpm dev
+# Terminal 1 — API (Hono + Bun, port 3001)
+pnpm --filter @ninelytics/api dev
+
+# Terminal 2 — Worker (Bun)
+pnpm --filter @ninelytics/worker dev
+
+# Terminal 3 — Frontend (TanStack Start + Vite, port 3000)
+pnpm --filter @ninelytics/web dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) — it redirects to `/dashboard`.
+Open [http://localhost:3000](http://localhost:3000) — it redirects to `/dashboard`. `/api/*` is proxied to the api on :3001 by Vite's dev server, so cookies and tRPC calls work same-origin.
 
 ---
 
@@ -295,15 +361,17 @@ Configure the banner in **Website Settings → Consent** tab.
 ## Scripts
 
 ```bash
-pnpm dev               # Start dev server (Turbopack)
-pnpm build             # Production build
-pnpm start             # Start production server
-pnpm lint              # Lint
-pnpm drizzle:generate  # Generate migrations
-pnpm drizzle:push      # Push schema to DB
-pnpm db:seed           # Seed database
-pnpm db:reset-seed     # Reset and re-seed
-pnpm db:maxmind        # Download MaxMind GeoIP database
+pnpm drizzle:push                           # drizzle-kit push against $DATABASE_URL
+pnpm drizzle:generate                       # generate a migration SQL file
+pnpm typecheck                              # tsc --noEmit across all workspaces
+pnpm lint                                   # oxlint on apps/web (fast, Rust-based)
+
+pnpm --filter @ninelytics/api dev           # Hono + Bun dev with --hot
+pnpm --filter @ninelytics/worker dev        # Bun worker with --hot
+pnpm --filter @ninelytics/web dev           # Vite dev server (port 3000, /api proxied)
+
+pnpm --filter @ninelytics/web build         # production bundle → apps/web/dist/
+pnpm --filter @ninelytics/api typecheck     # per-app typecheck
 ```
 
 ---
@@ -395,7 +463,7 @@ The background workflow handles everything without manual intervention:
 
 ### Docker Compose (recommended)
 
-The included `docker-compose.yml` runs the full stack: **PostgreSQL 17 + PgBouncer + Dragonfly (Redis) + Next.js app**.
+The included `docker-compose.yml` runs **six services**: `postgres`, `pgbouncer`, `dragonfly`, `api`, `worker`, and `web`. Schema migrations run inline in the api's entrypoint — no separate one-shot container.
 
 ```bash
 # 1. Copy and configure environment
@@ -405,46 +473,56 @@ cp docker.env.example .env
 # 2. Start everything
 docker compose up -d
 
-# 3. (First run only) Seed the admin user
-docker compose exec app npx tsx scripts/seed.ts
+# 3. (First run only) Create the first user
+# Hit POST https://<your-host>/api/auth/signup — or use /auth/signup in the browser.
+# Single-tenant mode auto-allows the first signup as OWNER.
 ```
 
-Open `http://localhost:3000` — login with the seed credentials.
+Open `http://localhost:3000`.
 
 **Architecture:**
 
 ```
-Client → :3000 → [app] → :6432 → [pgbouncer] → :5432 → [postgres]
-                       → :6379 → [dragonfly]
+Traefik → :3000 → [web] → /api/* → [api:3001] → :6432 → [pgbouncer] → :5432 → [postgres]
+                                              → :6379 → [dragonfly] ← [worker] (tracking + workflow queues + scheduler)
 ```
 
-- **PgBouncer** — connection pooler in transaction mode (20 pool size, 1000 max clients). Eliminates per-request connection overhead.
-- **Dragonfly** — Redis-compatible in-memory store, 25x faster than Redis. Handles real-time analytics, notifications, rate limiting.
-- **Schema migrations** run automatically on startup via `drizzle-kit push`.
+- **web** (TanStack Start on Bun) — SSR + static assets + reverse-proxy of `/api/*` to the api container over the internal docker network. Exposes 3000.
+- **api** (Hono on Bun) — ingest endpoints, tRPC, auth, AI chat streaming. Runs `scripts/api-entrypoint.sh` on boot: drizzle-kit push + TimescaleDB hypertable setup, then exec's the server. Exposes 3001.
+- **worker** (Bun) — BRPOP loops on `tracking:jobs` and `jobs:workflow`, plus a setInterval scheduler that scans uptime (every 5 min) and sitemap auto-index sites (every 6 h). Graceful shutdown on SIGINT/SIGTERM.
+- **pgbouncer** — connection pooler in transaction mode (20 pool size, 1000 max clients). The api sets `prepare: false` on its postgres client to be safe under transaction pooling.
+- **dragonfly** — Redis-compatible in-memory store (512 MB max). Backs real-time analytics, rate limits, tracking queue, workflow queue.
+- **postgres 17 + TimescaleDB** — hypertables on `page_views`, `events`, `uptime_checks`, `web_vitals`.
+
+Healthchecks are aggressive (3 s interval on `web`, start_period 90 s on `api`) so Traefik/Coolify routes traffic as soon as the server actually accepts it — post-deploy 504 windows are seconds, not minutes.
 
 ### Coolify
 
 1. **New Resource** → select your Git repository
 2. In **Build Pack**, choose **Docker Compose**
 3. In **Docker Compose Location**, enter `docker-compose.yml`
-4. Add environment variables in the Coolify UI:
-   - `DB_PASSWORD`, `NEXTAUTH_SECRET`, `APP_URL` (required)
-   - `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_AI_API_KEY` (optional, for AI)
-   - See `docker.env.example` for all options
-5. Deploy — Coolify builds the image, starts all 4 services (PostgreSQL, PgBouncer, Dragonfly, App)
+4. Point your FQDN at the `web` service (port 3000). The `/api/*` proxy is built into `web/server-prod.js`, so a single hostname covers the frontend and all API endpoints.
+5. Add environment variables in the Coolify UI — see `docker.env.example` for the full list. Minimum:
+   - `DB_PASSWORD`, `NEXTAUTH_SECRET`, `APP_URL`
+   - Optional: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_AI_API_KEY` (AI Insights), `MAXMIND_LICENSE_KEY` (geo maps), `RESEND_API_KEY` / `TWILIO_*` (uptime alerts), `GOOGLE_API_CLIENT_ID` + `GOOGLE_API_CLIENT_SECRET` (GA4 + Search Console).
+6. Deploy — Coolify builds the images, runs drizzle-kit push during api startup, and starts serving.
 
 ### Manual (without Docker)
 
 ```bash
-# Prerequisites: Node 22+, pnpm, PostgreSQL, Redis/Dragonfly
+# Prereqs: Bun 1.3, Node 22, pnpm 10, PostgreSQL 17 + TimescaleDB, Redis/Dragonfly.
 pnpm install
-pnpm build
 pnpm drizzle:push
-pnpm db:seed
-pnpm start
+
+# Terminal 1 — API
+cd apps/api && bun run src/index.ts
+# Terminal 2 — Worker
+cd apps/worker && bun run src/index.ts
+# Terminal 3 — Web (build + serve)
+cd apps/web && pnpm build && bun run server-prod.js
 ```
 
-Set all environment variables from `.env.example` before starting.
+Set all environment variables from `docker.env.example` before starting.
 
 ---
 
