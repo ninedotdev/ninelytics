@@ -30,13 +30,21 @@ export default {
     const url = new URL(req.url)
     const pathname = decodeURIComponent(url.pathname)
 
-    // Cheap healthcheck — bypasses SSR so docker healthchecks never
-    // hang on a slow React render.
+    // Healthcheck: also probes the api so Coolify restarts us when the
+    // web↔api path is broken (not just when SSR is up).
     if (pathname === '/_health') {
-      return new Response('ok', {
-        status: 200,
-        headers: { 'Content-Type': 'text/plain', 'Cache-Control': 'no-store' },
-      })
+      try {
+        const r = await fetch(`${API_URL}/api/health`, {
+          signal: AbortSignal.timeout(2000),
+        })
+        if (!r.ok) return new Response('api unhealthy', { status: 503 })
+        return new Response('ok', {
+          status: 200,
+          headers: { 'Content-Type': 'text/plain', 'Cache-Control': 'no-store' },
+        })
+      } catch {
+        return new Response('api unreachable', { status: 503 })
+      }
     }
 
     // /api/* → forward to the Hono API container. Same-origin keeps
@@ -46,6 +54,13 @@ export default {
       const headers = new Headers(req.headers)
       headers.set('host', API_HOST)
       headers.delete('connection')
+
+      // Propagate client abort + hard timeout. Without this a slow upstream
+      // piles hung requests in Bun's connection pool and the web appears
+      // frozen until a redeploy clears it.
+      const timeoutMs = pathname.startsWith('/api/ai-chat') ? 120_000 : 25_000
+      const signal = AbortSignal.any([req.signal, AbortSignal.timeout(timeoutMs)])
+
       try {
         return await fetch(target, {
           method: req.method,
@@ -54,8 +69,12 @@ export default {
           // @ts-ignore — Bun supports request body streaming via duplex
           duplex: 'half',
           redirect: 'manual',
+          signal,
         })
       } catch (err) {
+        if (err?.name === 'AbortError' || err?.name === 'TimeoutError') {
+          return new Response('Upstream timeout', { status: 504 })
+        }
         console.error(
           `[proxy] ${req.method} ${pathname} → ${target} failed:`,
           err?.message ?? err,
