@@ -156,7 +156,6 @@
     else if (ua.includes('Android')) os = 'Android';
     else if (ua.includes('iOS') || ua.includes('iPhone') || ua.includes('iPad')) os = 'iOS';
 
-    // Detect device type (improved detection like Umami)
     const screenWidth = screen.width;
     if (/Mobile|Android|iPhone|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua)) {
       device = 'Mobile';

@@ -62,11 +62,7 @@ function SearchConsolePage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <IconWorldSearch size={20} className="text-primary" />
-          <h1 className="text-lg font-semibold">Search Console</h1>
-        </div>
+      <div className="flex items-center justify-end">
         <div className="flex items-center gap-2">
           <Select value={period} onValueChange={setPeriod}>
             <SelectTrigger className="w-[130px] h-8 text-sm">

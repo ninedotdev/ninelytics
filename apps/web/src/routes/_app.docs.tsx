@@ -55,8 +55,7 @@ function DocsPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-lg font-semibold">Documentation</h1>
+      <div className="flex items-center justify-end">
         <Select value={activeSection} onValueChange={setActiveSection}>
           <SelectTrigger className="w-[260px]">
             <SelectValue />

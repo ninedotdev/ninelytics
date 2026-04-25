@@ -18,6 +18,7 @@ import {
   IconFilter,
   IconGauge,
   IconWorldSearch,
+  IconRoute,
 } from "@tabler/icons-react";
 import { useSession, useSignOut } from "@/lib/auth";
 import { useRouter, useRouterState, Link } from "@tanstack/react-router";
@@ -60,6 +61,7 @@ function getNavigationItems(session: { user?: { role?: string; isSuperAdmin?: bo
     { title: "Websites", url: "/websites", icon: IconGlobe },
     { title: "Analytics", url: "/analytics", icon: IconChartBar },
     { title: "Real-time", url: "/realtime", icon: IconActivity },
+    { title: "Sessions", url: "/sessions", icon: IconRoute },
     { title: "Goals", url: "/goals", icon: IconTarget },
     { title: "Funnels", url: "/analytics?tab=funnels", icon: IconFilter },
     { title: "Search Console", url: "/search-console", icon: IconWorldSearch },

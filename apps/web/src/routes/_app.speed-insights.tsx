@@ -141,13 +141,7 @@ function SpeedInsightsPage() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-wrap items-center gap-3">
-        <div className="flex items-center gap-2 mr-auto">
-          <IconGauge size={20} className="text-muted-foreground" />
-          <h1 className="text-lg font-semibold">Speed Insights</h1>
-        </div>
-
+      <div className="flex flex-wrap items-center justify-end gap-3">
         <Select value={effectiveWebsite} onValueChange={setSelectedWebsite}>
           <SelectTrigger className="w-56">
             <SelectValue placeholder="Select a website" />
