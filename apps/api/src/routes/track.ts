@@ -13,6 +13,7 @@ import {
 import {
   enqueueTrackingJob,
   serializeTrackingRequestContext,
+  TrackingQueueFullError,
 } from '@ninelytics/shared/tracking-queue'
 import {
   processConversionPayload,
@@ -48,7 +49,13 @@ for (const [path, type] of [
         })
         return c.json({ success: true, queued: true })
       } catch (queueError) {
-        console.error(`Tracking enqueue ${path} failed, inline fallback:`, queueError)
+        if (queueError instanceof TrackingQueueFullError) {
+          console.warn(
+            `[track${path}] queue full (depth=${queueError.depth}), processing inline`,
+          )
+        } else {
+          console.error(`Tracking enqueue ${path} failed, inline fallback:`, queueError)
+        }
       }
 
       const result = await processEvent(payload, ctx)
@@ -76,7 +83,13 @@ track.post('/conversion', trackLimiter, async (c) => {
       await enqueueTrackingJob({ kind: 'conversion', payload: body })
       return c.json({ success: true, queued: true })
     } catch (queueError) {
-      console.error('Conversion enqueue failed, inline fallback:', queueError)
+      if (queueError instanceof TrackingQueueFullError) {
+        console.warn(
+          `[track/conversion] queue full (depth=${queueError.depth}), processing inline`,
+        )
+      } else {
+        console.error('Conversion enqueue failed, inline fallback:', queueError)
+      }
     }
 
     const result = await processConversionPayload(body)

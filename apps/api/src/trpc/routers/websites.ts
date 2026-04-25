@@ -16,6 +16,7 @@ import {
 } from "@ninelytics/db/schema"
 import { protectedProcedure, publicProcedure, router } from "../trpc"
 import { safeTimezone, tzDate } from "@ninelytics/shared/timezone"
+import { withQueryCache } from "@ninelytics/shared/query-cache"
 
 const paginationSchema = z.object({
   page: z.number().int().min(1).optional(),
@@ -209,6 +210,9 @@ export const websitesRouter = router({
       const pageSize = input?.pageSize && input.pageSize > 0 ? Math.min(input.pageSize, 100) : 50
       const offset = (page - 1) * pageSize
 
+      const cacheKey = `websites:optimized:${userId}:${tz}:${page}:${pageSize}`
+      return withQueryCache(cacheKey, 45, async () => {
+
       // Total count of accessible websites
       const totalResult = await ctx.db.execute<{ total: number }>(sql`
         SELECT COUNT(*)::int as total
@@ -322,6 +326,7 @@ export const websitesRouter = router({
         pageSize,
         hasMore: offset + pageSize < total,
       }
+      })
     }),
 
   byId: protectedProcedure

@@ -11,6 +11,7 @@ import {
 import { eq, and, sql, desc, inArray, isNotNull } from "drizzle-orm"
 import { startOfDay, endOfDay, startOfMonth, endOfMonth } from "date-fns"
 import { formatEventMessage } from "@ninelytics/shared/event-formatter"
+import { withQueryCache } from "@ninelytics/shared/query-cache"
 
 async function getUserWebsiteIds(db: typeof import("@ninelytics/shared/db").db, userId: string) {
   const result = await db
@@ -179,7 +180,9 @@ export const dashboardRouter = router({
       }
 
       const targetIds = input?.websiteId ? [input.websiteId] : allWebsiteIds
+      const cacheKey = `dashboard:map:${userId}:${input?.websiteId ?? 'all'}`
 
+      return withQueryCache(cacheKey, 45, async () => {
       const now = new Date()
       const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
       const fourteenDaysAgo = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000)
@@ -313,6 +316,7 @@ export const dashboardRouter = router({
         topReferrers: topReferrersResult.map((r) => ({ label: r.referrer, value: Number(r.count) })),
         deviceBreakdown: deviceResult.map((d) => ({ device: d.device, count: Number(d.count) })),
       }
+      })
     }),
 
   websites: protectedProcedure.query(async ({ ctx }) => {

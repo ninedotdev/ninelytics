@@ -53,7 +53,8 @@
     "./timezone": "./src/timezone.ts",
     "./integration-goals": "./src/integration-goals.ts",
     "./workflow-queue": "./src/workflow-queue.ts",
-    "./vitals-queue": "./src/vitals-queue.ts"
+    "./vitals-queue": "./src/vitals-queue.ts",
+    "./query-cache": "./src/query-cache.ts"
   },
   "dependencies": {
     "@ninelytics/db": "workspace:*",
