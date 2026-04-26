@@ -119,7 +119,7 @@ function SessionsPage() {
     : null
 
   return (
-    <div className="p-4 md:p-6 space-y-4">
+    <div className="space-y-4 md:space-y-6">
       <div className="flex flex-col gap-2 md:flex-row md:items-center md:gap-3">
         <Select value={websiteId} onValueChange={(v) => { setWebsiteId(v); setPage(1) }}>
           <SelectTrigger className="md:w-56">

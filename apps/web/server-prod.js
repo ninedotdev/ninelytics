@@ -89,11 +89,22 @@ export default {
       if (abs.startsWith(CLIENT_DIR) && existsSync(abs)) {
         const stat = statSync(abs)
         if (stat.isFile()) {
-          return new Response(file(abs), {
-            headers: pathname.startsWith('/assets/')
-              ? { 'Cache-Control': 'public, max-age=31536000, immutable' }
-              : {},
-          })
+          // CORP: cross-origin so customer sites can embed our tracker
+          // scripts via <script src="https://app.ours/analytics.js">.
+          // Without this header modern Chrome blocks the response with
+          // ERR_BLOCKED_BY_RESPONSE.NotSameOrigin.
+          const headers = {
+            'Cross-Origin-Resource-Policy': 'cross-origin',
+            'Access-Control-Allow-Origin': '*',
+          }
+          if (pathname.startsWith('/assets/')) {
+            headers['Cache-Control'] = 'public, max-age=31536000, immutable'
+          } else if (pathname.endsWith('.js')) {
+            // Tracker scripts: short cache so we can ship updates without
+            // waiting a year, but keep CDN-friendly.
+            headers['Cache-Control'] = 'public, max-age=300, must-revalidate'
+          }
+          return new Response(file(abs), { headers })
         }
       }
     }

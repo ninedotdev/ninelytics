@@ -1508,6 +1508,11 @@ function WebsiteSettingsPage() {
             </div>
           </div>
 
+          {/* ── Cloudflare enhanced geolocation sub-row ── */}
+          {website.cloudflareZoneId && (
+            <CloudflareEnhancedGeoRow websiteId={websiteId} />
+          )}
+
           {/* ── Google Analytics row ── */}
           <div className="flex items-start justify-between gap-4 p-4">
             <div className="flex items-center gap-3 min-w-0">
@@ -2343,5 +2348,54 @@ function WebsiteSettingsPage() {
         </div>
       )}
     </>
+  );
+}
+
+function CloudflareEnhancedGeoRow({ websiteId }: { websiteId: string }) {
+  const utils = trpc.useUtils();
+  const status = trpc.cloudflare.enhancedGeoStatus.useQuery(
+    { websiteId },
+    { staleTime: 30_000 },
+  );
+  const setEnabled = trpc.cloudflare.setEnhancedGeo.useMutation({
+    onSuccess: () => {
+      utils.cloudflare.enhancedGeoStatus.invalidate({ websiteId });
+    },
+  });
+
+  const data = status.data;
+  if (!data || data.available === false) return null;
+
+  const enabled = data.enabled === true;
+  const error = "error" in data ? data.error : null;
+
+  return (
+    <div className="flex items-start justify-between gap-4 px-4 pb-4 -mt-2 pl-12">
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2">
+          <div className="text-xs font-medium">Enhanced geolocation</div>
+          <button
+            type="button"
+            onClick={() => utils.cloudflare.enhancedGeoStatus.invalidate({ websiteId })}
+            className="text-[10px] text-muted-foreground hover:text-foreground underline-offset-2 hover:underline"
+          >
+            recheck
+          </button>
+        </div>
+        <div className="text-[11px] text-muted-foreground">
+          Add city, region, postal code and timezone headers from Cloudflare.
+          {error ? (
+            <span className="block text-red-600 mt-0.5 break-words">
+              CF said: {error}
+            </span>
+          ) : null}
+        </div>
+      </div>
+      <Switch
+        checked={enabled}
+        disabled={setEnabled.isPending || !!error}
+        onCheckedChange={(v) => setEnabled.mutate({ websiteId, enabled: v })}
+      />
+    </div>
   );
 }

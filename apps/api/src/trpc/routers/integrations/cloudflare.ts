@@ -180,4 +180,53 @@ export const cloudflareRouter = router({
         dateRange: cfData.length > 0 ? { from: cfData[0].date, to: cfData[cfData.length - 1].date } : null,
       }
     }),
+
+  // ── "Add visitor location headers" Managed Transform: read + toggle.
+  //    Once enabled CF sends cf-ipcity / cf-region / cf-postal-code / lat /
+  //    lon / timezone to the origin (free on every plan). Requires the
+  //    user's CF token to have Zone → Transform Rules: Edit (or Zone:Edit).
+  enhancedGeoStatus: protectedProcedure
+    .input(z.object({ websiteId: z.string() }))
+    .query(async ({ ctx, input }) => {
+      const userId = ctx.session!.user.id
+      const canEdit = await ensureAccess(ctx.db, input.websiteId, userId, true)
+      if (!canEdit) throw new Error("Website not found or insufficient permissions")
+
+      const [[user], [website]] = await Promise.all([
+        ctx.db.select({ cloudflareApiToken: users.cloudflareApiToken }).from(users).where(eq(users.id, userId)).limit(1),
+        ctx.db.select({ cloudflareZoneId: websites.cloudflareZoneId }).from(websites).where(eq(websites.id, input.websiteId)).limit(1),
+      ])
+
+      if (!user?.cloudflareApiToken || !website?.cloudflareZoneId) {
+        return { available: false as const }
+      }
+
+      try {
+        const { getVisitorLocationHeadersStatus } = await import("@ninelytics/shared/cloudflare-managed-transforms")
+        const enabled = await getVisitorLocationHeadersStatus(website.cloudflareZoneId, user.cloudflareApiToken)
+        return { available: true as const, enabled: enabled ?? false }
+      } catch (err) {
+        return { available: true as const, enabled: false, error: (err as Error).message }
+      }
+    }),
+
+  setEnhancedGeo: protectedProcedure
+    .input(z.object({ websiteId: z.string(), enabled: z.boolean() }))
+    .mutation(async ({ ctx, input }) => {
+      const userId = ctx.session!.user.id
+      const canEdit = await ensureAccess(ctx.db, input.websiteId, userId, true)
+      if (!canEdit) throw new Error("Website not found or insufficient permissions")
+
+      const [[user], [website]] = await Promise.all([
+        ctx.db.select({ cloudflareApiToken: users.cloudflareApiToken }).from(users).where(eq(users.id, userId)).limit(1),
+        ctx.db.select({ cloudflareZoneId: websites.cloudflareZoneId }).from(websites).where(eq(websites.id, input.websiteId)).limit(1),
+      ])
+
+      if (!user?.cloudflareApiToken) throw new Error("No Cloudflare API token configured")
+      if (!website?.cloudflareZoneId) throw new Error("No Cloudflare zone linked to this website")
+
+      const { setVisitorLocationHeadersEnabled } = await import("@ninelytics/shared/cloudflare-managed-transforms")
+      await setVisitorLocationHeadersEnabled(website.cloudflareZoneId, user.cloudflareApiToken, input.enabled)
+      return { success: true, enabled: input.enabled }
+    }),
 })

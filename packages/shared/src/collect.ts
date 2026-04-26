@@ -20,6 +20,16 @@ import {
 import { realtimeHelpers, isRedisConnected } from './redis'
 import { getClientIp } from './get-client-ip'
 
+// Collapse client-supplied device strings into a single canonical casing
+// so "Mobile" / "mobile" / "MOBILE" all group as one row. We can't trust
+// SDKs (or third-party integrations) to be consistent.
+function normalizeDevice(d: string | null | undefined): string | null {
+  if (!d) return null
+  const t = d.trim()
+  if (!t) return null
+  return t[0]!.toUpperCase() + t.slice(1).toLowerCase()
+}
+
 export interface CollectPayload {
   type: 'pageview' | 'event' | 'session'
   trackingCode: string
@@ -140,7 +150,7 @@ export async function processEvent(
     userAgent: payload.userAgent || ctx.headerUserAgent,
     browser: payload.browser,
     os: payload.os,
-    device: payload.device,
+    device: normalizeDevice(payload.device),
     screenResolution: payload.screenResolution,
     viewport: payload.viewport,
     language: payload.language,
@@ -210,7 +220,7 @@ export async function processEvent(
             page,
             country: geoData.country ?? undefined,
             city: geoData.city ?? undefined,
-            device: payload.device,
+            device: normalizeDevice(payload.device) ?? undefined,
             browser: payload.browser,
           })
           .catch((err) => console.error('Redis error:', err))

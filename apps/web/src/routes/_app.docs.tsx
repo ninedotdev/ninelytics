@@ -90,6 +90,7 @@ function DocsPage() {
                 <ul className="list-disc list-inside text-muted-foreground mt-1 space-y-0.5">
                   <li><strong>Zone &mdash; Zone &mdash; Read</strong></li>
                   <li><strong>Zone &mdash; Analytics &mdash; Read</strong></li>
+                  <li><strong>Zone &mdash; Transform Rules &mdash; Edit</strong> <span className="text-xs">(optional, enables Enhanced geolocation toggle)</span></li>
                 </ul>
                 <p className="text-muted-foreground mt-1">Set zone resources to <strong>All zones</strong>.</p>
               </Step>
@@ -110,6 +111,21 @@ function DocsPage() {
                 </p>
               </Step>
             </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader><CardTitle className="text-sm font-medium">Enhanced geolocation</CardTitle></CardHeader>
+          <CardContent className="space-y-3 text-sm text-muted-foreground">
+            <p>
+              By default Cloudflare only sends the visitor&apos;s country to the origin. Toggle <strong>Enhanced geolocation</strong> on a website&apos;s settings to enable Cloudflare&apos;s &quot;Add visitor location headers&quot; managed transform &mdash; this adds <strong>city, region, postal code, latitude/longitude and timezone</strong> for every request.
+            </p>
+            <ul className="list-disc list-inside space-y-1">
+              <li>Available on every Cloudflare plan, including Free.</li>
+              <li>Requires the API token to have <strong>Zone &mdash; Transform Rules &mdash; Edit</strong>.</li>
+              <li>City data resolved at the edge is generally more accurate than IP-database lookups for VPN, IPv6 and CGNAT traffic.</li>
+              <li>Reversible &mdash; toggle off anytime from the same place.</li>
+            </ul>
           </CardContent>
         </Card>
 
