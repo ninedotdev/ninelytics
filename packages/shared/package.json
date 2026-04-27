@@ -28,6 +28,7 @@
     "./google-oauth": "./src/google-oauth.ts",
     "./search-console": "./src/search-console.ts",
     "./cloudflare-analytics": "./src/cloudflare-analytics.ts",
+    "./cloudflare-managed-transforms": "./src/cloudflare-managed-transforms.ts",
     "./posthog-api": "./src/posthog-api.ts",
     "./stripe-api": "./src/stripe-api.ts",
     "./telegram": "./src/telegram.ts",
