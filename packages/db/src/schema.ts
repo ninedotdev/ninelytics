@@ -418,6 +418,10 @@ export const visitors = pgTable(
     idxWebsiteBrowser: index("visitors_website_id_browser_idx").on(table.websiteId, table.browser),
     idxWebsiteOs: index("visitors_website_id_os_idx").on(table.websiteId, table.os),
     idxWebsiteCountry: index("visitors_website_id_country_idx").on(table.websiteId, table.country),
+    // (websiteId, lastVisit) — used by every "active in last N days"
+    // breakdown (countries, devices, browsers, OS). Without this, Postgres
+    // sequential-scans every visitor row for the site.
+    idxWebsiteLastVisit: index("visitors_website_id_last_visit_idx").on(table.websiteId, table.lastVisit),
   })
 )
 
@@ -457,6 +461,9 @@ export const visitorSessions = pgTable(
     idxWebsiteCreatedAt: index("visitor_sessions_website_id_created_at_idx").on(table.websiteId, table.createdAt),
     idxVisitorId: index("visitor_sessions_visitor_id_idx").on(table.visitorId),
     idxWebsiteSource: index("visitor_sessions_website_id_source_idx").on(table.websiteId, table.source),
+    // (websiteId, startTime) — sessions list / public share / bounce-rate
+    // queries all filter by start_time, not created_at.
+    idxWebsiteStartTime: index("visitor_sessions_website_id_start_time_idx").on(table.websiteId, table.startTime),
   })
 )
 

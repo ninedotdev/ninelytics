@@ -11,6 +11,8 @@ import { redis } from '@ninelytics/shared/redis'
 import {
   dequeueTrackingJob,
   drainTrackingJobs,
+  getLegacyQueueKey,
+  getShardCount,
   getTrackingQueueKey,
   processTrackingJob,
   type TrackingJob,
@@ -139,22 +141,39 @@ async function processTrackingBatch(batch: TrackingJob[]) {
 }
 
 async function main() {
+  const shardCount = getShardCount()
   console.log(
     `[worker] listening on queues ${getTrackingQueueKey()}, ${getVitalsQueueKey()}, ${getWorkflowQueueKey()}`,
   )
   console.log(
-    `[worker] batch sizes: tracking=${TRACKING_BATCH_SIZE}, vitals=${VITALS_BATCH_SIZE}`,
+    `[worker] tracking shards=${shardCount}, batch sizes: tracking=${TRACKING_BATCH_SIZE}, vitals=${VITALS_BATCH_SIZE}`,
   )
   startScheduler()
 
-  await Promise.all([
-    consumeBatched(
-      'tracking',
-      dequeueTrackingJob,
-      drainTrackingJobs,
+  // One consumer per shard — independent BRPOP loops so a flood on one
+  // shard can't block the others. Plus a legacy consumer to drain leftover
+  // jobs from the pre-shard single queue (will be a no-op once empty).
+  const trackingConsumers = Array.from({ length: shardCount }, (_, shard) =>
+    consumeBatched<TrackingJob>(
+      `tracking#${shard}`,
+      (sec) => dequeueTrackingJob(shard, sec),
+      (max) => drainTrackingJobs(shard, max),
       processTrackingBatch,
       TRACKING_BATCH_SIZE,
     ),
+  )
+
+  const legacyConsumer = consumeBatched<TrackingJob>(
+    'tracking#legacy',
+    (sec) => dequeueTrackingJob(getLegacyQueueKey(), sec),
+    (max) => drainTrackingJobs(getLegacyQueueKey(), max),
+    processTrackingBatch,
+    TRACKING_BATCH_SIZE,
+  )
+
+  await Promise.all([
+    ...trackingConsumers,
+    legacyConsumer,
     consumeBatched<VitalsJob>(
       'vitals',
       dequeueVitalsJob,
