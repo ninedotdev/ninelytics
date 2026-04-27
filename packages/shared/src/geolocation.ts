@@ -36,6 +36,8 @@ interface IpApiResponse {
   query?: string
 }
 
+import { toCountryName } from './country-names'
+
 // Provider headers configuration (like Umami)
 const PROVIDER_HEADERS = [
   // Cloudflare headers
@@ -156,14 +158,22 @@ function getLocationFromHeaders(headers: Headers): PartialGeoFromHeaders | null 
   for (const provider of PROVIDER_HEADERS) {
     const countryHeader = headers.get(provider.countryHeader)
     if (countryHeader) {
-      const country = decodeURIComponent(countryHeader)
+      const raw = decodeURIComponent(countryHeader)
+      // Headers normally carry an ISO 3166-1 alpha-2 code (e.g. "US").
+      // Resolve to the full English name so the visitors.country column is
+      // consistent with values produced by MaxMind / ip-api ("United
+      // States"). Without this, GROUP BY country splits the same place into
+      // two rows.
+      const code = raw.length === 2 ? raw.toUpperCase() : null
+      const resolved = toCountryName(raw)
+      const fullName = resolved !== 'Unknown' ? resolved : raw
       const region = headers.get(provider.regionHeader)
       const cityRaw = headers.get(provider.cityHeader)
       const city = cityRaw ? decodeURIComponent(cityRaw) : null
 
       return {
-        country: country || null,
-        countryCode: country?.toUpperCase() || null,
+        country: fullName || null,
+        countryCode: code ?? raw.toUpperCase() ?? null,
         region: region || null,
         regionName: region || null,
         city,
@@ -250,17 +260,7 @@ export async function getGeoLocation(
   // Check cache first
   const cached = geoCache.get(ipAddress)
   if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
-    // Merge: CF headers country takes priority over cached data
-    if (headerPartial) {
-      return {
-        ...cached.data,
-        country: headerPartial.country ?? cached.data.country,
-        countryCode: headerPartial.countryCode ?? cached.data.countryCode,
-        region: headerPartial.region ?? cached.data.region,
-        regionName: headerPartial.regionName ?? cached.data.regionName,
-      }
-    }
-    return cached.data
+    return mergeHeadersWithLookup(headerPartial, cached.data)
   }
 
   // 2. Try MaxMind local database
@@ -268,14 +268,7 @@ export async function getGeoLocation(
   if (reader) {
     const maxmindData = getLocationFromMaxmind(reader, ipAddress)
     if (maxmindData) {
-      // Merge: CF country/region takes priority, MaxMind provides city/coords
-      const merged: GeoLocation = {
-        ...maxmindData,
-        country: headerPartial?.country ?? maxmindData.country,
-        countryCode: headerPartial?.countryCode ?? maxmindData.countryCode,
-        region: headerPartial?.region ?? maxmindData.region,
-        regionName: headerPartial?.regionName ?? maxmindData.regionName,
-      }
+      const merged = mergeHeadersWithLookup(headerPartial, maxmindData)
       geoCacheSet(ipAddress, merged)
       return merged
     }
@@ -322,11 +315,11 @@ export async function getGeoLocation(
 
     recordSuccess()
 
-    const geoData: GeoLocation = {
-      country: headerPartial?.country ?? data.country ?? null,
-      countryCode: headerPartial?.countryCode ?? data.countryCode ?? null,
-      region: headerPartial?.region ?? data.region ?? null,
-      regionName: headerPartial?.regionName ?? data.regionName ?? null,
+    const lookupData: GeoLocation = {
+      country: data.country ?? null,
+      countryCode: data.countryCode ?? null,
+      region: data.region ?? null,
+      regionName: data.regionName ?? null,
       city: data.city || null,
       zip: data.zip || null,
       lat: data.lat || null,
@@ -335,6 +328,7 @@ export async function getGeoLocation(
       isp: data.isp || null,
     }
 
+    const geoData = mergeHeadersWithLookup(headerPartial, lookupData)
     geoCacheSet(ipAddress, geoData)
 
     return geoData
@@ -352,6 +346,44 @@ export async function getGeoLocation(
       }
     }
     return createNullGeoData()
+  }
+}
+
+/**
+ * Merge header-derived geo (typically only country, e.g. Cloudflare Free)
+ * with IP-lookup geo (MaxMind / ip-api / cache) without producing
+ * incoherent (city, country) pairs like "Paris, Spain".
+ *
+ * Rule:
+ *   - No headers → return lookup as-is.
+ *   - Headers + lookup agree on countryCode (ISO) → headers win for
+ *     country/region (CDN edge is authoritative), lookup provides city/coords.
+ *   - Headers + lookup disagree → trust the lookup as a coherent pair
+ *     (country, region, city all from the same source). This is the case
+ *     that fixes "Paris, Spain": header says ES, IP geolocates to FR/Paris,
+ *     so we keep the FR+Paris pair instead of mixing.
+ */
+function mergeHeadersWithLookup(
+  headerPartial: PartialGeoFromHeaders | null,
+  lookup: GeoLocation
+): GeoLocation {
+  if (!headerPartial) return lookup
+
+  const headerIso = headerPartial.countryCode?.toUpperCase() ?? null
+  const lookupIso = lookup.countryCode?.toUpperCase() ?? null
+
+  // If lookup has no country, headers fill in (no risk of mismatch).
+  // If both present and disagree, prefer the lookup pair.
+  if (lookupIso && headerIso && lookupIso !== headerIso) {
+    return lookup
+  }
+
+  return {
+    ...lookup,
+    country: headerPartial.country ?? lookup.country,
+    countryCode: headerPartial.countryCode ?? lookup.countryCode,
+    region: headerPartial.region ?? lookup.region,
+    regionName: headerPartial.regionName ?? lookup.regionName,
   }
 }
 

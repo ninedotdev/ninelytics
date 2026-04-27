@@ -35,6 +35,7 @@
     currentPath: null, // Track current path for SPA dedup
     cookieConsent: null, // Analytics consent config from server
     consentGiven: null, // null = not decided, object = categories accepted
+    cookielessMode: false, // when true, skip cookies/localStorage; server derives visitorId
   };
 
   // Utility functions
@@ -76,6 +77,10 @@
   }
 
   function getVisitorId() {
+    // Cookieless mode: send a placeholder; the server overwrites it with a
+    // hash of (websiteId, IP, UA, day). No cookie/localStorage written.
+    if (state.cookielessMode) return 'cookieless';
+
     let visitorId = getStorageItem('analytics_visitor_id') || getCookie('analytics_visitor_id');
     if (!visitorId) {
       visitorId = generateId();
@@ -85,21 +90,53 @@
     return visitorId;
   }
 
+  // Cookieless: keep session in sessionStorage (per-tab, cleared on close,
+  // not considered a tracking cookie under GDPR essentialness rules) so
+  // navigation within a tab still groups as one session, but nothing
+  // persists across the browser session.
+  function readSession() {
+    if (state.cookielessMode) {
+      try {
+        return {
+          id: sessionStorage.getItem('analytics_session_id'),
+          start: parseInt(sessionStorage.getItem('analytics_session_start') || '0'),
+          lastActivity: parseInt(sessionStorage.getItem('analytics_last_activity') || '0'),
+        };
+      } catch (_) { return { id: null, start: 0, lastActivity: 0 }; }
+    }
+    return {
+      id: getStorageItem('analytics_session_id'),
+      start: parseInt(getStorageItem('analytics_session_start') || '0'),
+      lastActivity: parseInt(getStorageItem('analytics_last_activity') || '0'),
+    };
+  }
+  function writeSession(id, start, lastActivity) {
+    if (state.cookielessMode) {
+      try {
+        sessionStorage.setItem('analytics_session_id', id);
+        sessionStorage.setItem('analytics_session_start', String(start));
+        sessionStorage.setItem('analytics_last_activity', String(lastActivity));
+      } catch (_) { /* storage disabled — silently degrade */ }
+      return;
+    }
+    setStorageItem('analytics_session_id', id);
+    setStorageItem('analytics_session_start', String(start));
+    setStorageItem('analytics_last_activity', String(lastActivity));
+  }
+
   function getSessionId() {
     const now = Date.now();
-    let sessionId = getStorageItem('analytics_session_id');
-    let sessionStart = parseInt(getStorageItem('analytics_session_start') || '0');
-    let lastActivity = parseInt(getStorageItem('analytics_last_activity') || '0');
+    const cur = readSession();
+    let sessionId = cur.id;
+    let sessionStart = cur.start;
+    const lastActivity = cur.lastActivity;
 
     // Check if session expired based on last activity, not session start
     if (!sessionId || (now - (lastActivity || sessionStart)) > CONFIG.SESSION_TIMEOUT) {
       sessionId = generateId();
       sessionStart = now;
-      setStorageItem('analytics_session_id', sessionId);
-      setStorageItem('analytics_session_start', sessionStart.toString());
-      setStorageItem('analytics_last_activity', now.toString());
     }
-
+    writeSession(sessionId, sessionStart, now);
     return { sessionId, sessionStart };
   }
 
@@ -776,6 +813,7 @@
       var config = await response.json();
       state.excludedPaths = config.excludedPaths || [];
       state.cookieConsent = config.cookieConsent || null;
+      state.cookielessMode = !!config.cookielessMode;
 
       // Speed Insights — lazy-load optional module
       if (config.speedInsights) {

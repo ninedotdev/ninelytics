@@ -291,6 +291,12 @@ export const websites = pgTable(
     lastSitemapHash: text("last_sitemap_hash"),
     // Speed Insights (Core Web Vitals RUM)
     speedInsightsEnabled: boolean("speed_insights_enabled").default(false),
+    // Cookieless tracking — when on, the SDK skips cookies/localStorage and
+    // visitor IDs are derived server-side from a daily-rotating hash. Avoids
+    // the need for a consent banner under GDPR/CCPA. Nullable so adding the
+    // column to existing populated tables doesn't need a backfill — readers
+    // treat null as false.
+    cookielessMode: boolean("cookieless_mode").default(false),
     // Uptime monitoring
     uptimeEnabled: boolean("uptime_enabled").default(false),
     uptimeKeyword: text("uptime_keyword"),
@@ -684,6 +690,31 @@ export const sitemapUrls = pgTable(
     websiteUrlKey: uniqueIndex("sitemap_urls_website_url_key").on(table.websiteId, table.url),
     websiteIdIdx: index("sitemap_urls_website_id_idx").on(table.websiteId),
     googleStatusIdx: index("sitemap_urls_google_status_idx").on(table.googleStatus),
+  })
+)
+
+// Public share links — read-only access to a website's dashboard via token,
+// no auth required. One token can be revoked / regenerated independently.
+export const websiteShareLinks = pgTable(
+  "website_share_links",
+  {
+    id: text("id").primaryKey().default(sql`gen_random_uuid()`),
+    websiteId: text("website_id")
+      .notNull()
+      .references(() => websites.id, { onDelete: "cascade" }),
+    token: text("token").notNull(),
+    label: text("label"),
+    createdBy: text("created_by")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    expiresAt: timestamp("expires_at", { mode: "string" }),
+    createdAt: timestamp("created_at", { mode: "string" }).defaultNow().notNull(),
+    lastViewedAt: timestamp("last_viewed_at", { mode: "string" }),
+    viewCount: integer("view_count").default(0).notNull(),
+  },
+  (table) => ({
+    tokenIdx: uniqueIndex("website_share_links_token_idx").on(table.token),
+    websiteIdx: index("website_share_links_website_idx").on(table.websiteId),
   })
 )
 

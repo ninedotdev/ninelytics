@@ -22,6 +22,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Badge } from "@/components/ui/badge";
 import { sileo } from "sileo";
 import { formatDate } from "@/lib/utils";
 import { WebsiteDeletionProgress } from "@/components/website-deletion-progress";
@@ -78,6 +79,7 @@ type Website = {
     privacyPolicyUrl?: string;
   } | null;
   speedInsightsEnabled?: boolean | null;
+  cookielessMode?: boolean | null;
   createdAt: string;
   updatedAt: string;
   ownerId: string;
@@ -1256,10 +1258,14 @@ function WebsiteSettingsPage() {
             </CardContent>
           </Card>
 
+          <ShareLinksCard websiteId={websiteId} />
+
           </TabsPanel>
 
           {/* ─── Consent Tab ─── */}
           <TabsPanel value="consent" className="space-y-6">
+
+        <CookielessModeCard websiteId={websiteId} initialEnabled={website?.cookielessMode ?? false} />
 
         {/* Analytics Consent */}
         <Card>
@@ -2345,3 +2351,182 @@ function WebsiteSettingsPage() {
     </>
   );
 }
+
+function ShareLinksCard({ websiteId }: { websiteId: string }) {
+  const utils = trpc.useUtils();
+  const { data: links, isLoading } = trpc.shareLinks.list.useQuery({ websiteId });
+  const createLink = trpc.shareLinks.create.useMutation({
+    onSuccess: () => utils.shareLinks.list.invalidate({ websiteId }),
+  });
+  const revokeLink = trpc.shareLinks.revoke.useMutation({
+    onSuccess: () => utils.shareLinks.list.invalidate({ websiteId }),
+  });
+
+  const [label, setLabel] = useState("");
+  const [expiresInDays, setExpiresInDays] = useState<string>("never");
+  const [copied, setCopied] = useState<string | null>(null);
+
+  const publicUrl = (token: string) => `${window.location.origin}/p/${token}`;
+
+  const onCopy = async (token: string) => {
+    try {
+      await navigator.clipboard.writeText(publicUrl(token));
+      setCopied(token);
+      setTimeout(() => setCopied(null), 1500);
+    } catch { /* ignore */ }
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-sm font-medium">Public sharing</CardTitle>
+        <CardDescription>
+          Generate read-only links to this website&apos;s dashboard. No login required to view.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="flex flex-col gap-2 md:flex-row md:items-end">
+          <div className="flex-1 space-y-1">
+            <Label className="text-xs">Label (optional)</Label>
+            <Input
+              placeholder="e.g. Client Q4 review"
+              value={label}
+              onChange={(e) => setLabel(e.target.value)}
+              maxLength={80}
+            />
+          </div>
+          <div className="space-y-1 md:w-48">
+            <Label className="text-xs">Expires</Label>
+            <Select value={expiresInDays} onValueChange={setExpiresInDays}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="never">Never</SelectItem>
+                <SelectItem value="7">In 7 days</SelectItem>
+                <SelectItem value="30">In 30 days</SelectItem>
+                <SelectItem value="90">In 90 days</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <Button
+            onClick={() => {
+              const days = expiresInDays === "never" ? undefined : Number(expiresInDays);
+              createLink.mutate({
+                websiteId,
+                label: label.trim() || undefined,
+                expiresInDays: days,
+              });
+              setLabel("");
+            }}
+            disabled={createLink.isPending}
+          >
+            {createLink.isPending ? <><Spinner size={14} className="mr-2" /> Creating...</> : "Create link"}
+          </Button>
+        </div>
+
+        <div className="rounded-md border">
+          {isLoading ? (
+            <div className="p-4 text-xs text-muted-foreground">Loading...</div>
+          ) : !links || links.length === 0 ? (
+            <div className="p-4 text-xs text-muted-foreground">
+              No share links yet. Created links appear here.
+            </div>
+          ) : (
+            <div className="divide-y">
+              {links.map((l) => {
+                const expired = l.expiresAt && new Date(l.expiresAt).getTime() < Date.now();
+                return (
+                  <div key={l.id} className="flex flex-col gap-2 p-3 md:flex-row md:items-center md:gap-3">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 text-xs">
+                        <span className="font-medium truncate">
+                          {l.label || "Untitled link"}
+                        </span>
+                        {expired ? (
+                          <Badge variant="destructive" className="text-[10px]">Expired</Badge>
+                        ) : null}
+                      </div>
+                      <div className="font-mono text-[11px] text-muted-foreground truncate">
+                        {publicUrl(l.token)}
+                      </div>
+                      <div className="text-[10px] text-muted-foreground mt-0.5">
+                        {l.viewCount} views
+                        {l.lastViewedAt ? ` · last viewed ${formatDate(l.lastViewedAt)}` : ""}
+                        {l.expiresAt ? ` · expires ${formatDate(l.expiresAt)}` : " · no expiry"}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => onCopy(l.token)}
+                        disabled={!!expired}
+                      >
+                        {copied === l.token ? "Copied!" : "Copy URL"}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-red-600 hover:text-red-700"
+                        onClick={() => revokeLink.mutate({ id: l.id })}
+                        disabled={revokeLink.isPending}
+                      >
+                        Revoke
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function CookielessModeCard({
+  websiteId,
+  initialEnabled,
+}: { websiteId: string; initialEnabled: boolean }) {
+  const utils = trpc.useUtils();
+  const [enabled, setEnabled] = useState(initialEnabled);
+  const update = trpc.websites.update.useMutation({
+    onSuccess: () => {
+      utils.websites.byId.invalidate({ id: websiteId });
+    },
+  });
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center justify-between">
+          <div>
+            <CardTitle className="text-sm font-medium">Cookieless tracking</CardTitle>
+            <CardDescription>
+              Identify visitors without cookies or local storage. Compliant with GDPR/CCPA out of the box, no consent banner required.
+            </CardDescription>
+          </div>
+          <Switch
+            checked={enabled}
+            disabled={update.isPending}
+            onCheckedChange={(checked) => {
+              setEnabled(checked);
+              update.mutate({ id: websiteId, data: { cookielessMode: checked } });
+            }}
+          />
+        </div>
+      </CardHeader>
+      <CardContent className="text-xs text-muted-foreground space-y-2">
+        <p>
+          When enabled, the visitor ID is derived server-side from a daily-rotating hash of the visitor&apos;s IP, user agent, and your site ID. No personal identifier is stored, and the hash rotates every day at 00:00 UTC — making long-term profiling impossible.
+        </p>
+        <ul className="list-disc list-inside space-y-1">
+          <li>Same-day session continuity (a visitor browsing for an hour shows as one session)</li>
+          <li>Across-day continuity is intentionally lost (privacy guarantee)</li>
+          <li>Captures 100% of visits — no data lost to consent rejections</li>
+        </ul>
+      </CardContent>
+    </Card>
+  );
+}
+

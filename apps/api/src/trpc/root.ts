@@ -23,6 +23,7 @@ import { sitemapRouter } from "./routers/sitemap"
 import { speedInsightsRouter } from "./routers/speed-insights"
 import { uptimeRouter } from "./routers/uptime"
 import { sessionsRouter } from "./routers/sessions"
+import { shareLinksRouter } from "./routers/share-links"
 import { router } from "./trpc"
 
 export const appRouter = router({
@@ -51,6 +52,7 @@ export const appRouter = router({
   speedInsights: speedInsightsRouter,
   uptime: uptimeRouter,
   sessions: sessionsRouter,
+  shareLinks: shareLinksRouter,
 })
 
 export type AppRouter = typeof appRouter

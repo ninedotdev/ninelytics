@@ -86,6 +86,7 @@ function getNavigationItems(session: { user?: { role?: string; isSuperAdmin?: bo
 export function AppSidebar() {
   const { data: session } = useSession();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const searchObj = useRouterState({ select: (s) => s.location.search }) as Record<string, unknown>;
   const router = useRouter();
   const signOutMutation = useSignOut();
   const [searchOpen, setSearchOpen] = useState(false);
@@ -169,34 +170,64 @@ export function AppSidebar() {
           <SidebarGroup>
             <SidebarGroupContent>
               <SidebarMenu>
-                {getNavigationItems(session).map((item) => {
-                  // TanStack Router's <Link to=> doesn't parse '?foo=bar' out
-                  // of the path string. Split it into to + search so search
-                  // params actually propagate (e.g. Funnels → /analytics?tab=funnels).
-                  const [pathOnly, queryStr] = item.url.split("?");
-                  const searchObj: Record<string, string> = {};
-                  if (queryStr) {
-                    for (const kv of queryStr.split("&")) {
-                      const [k, v = ""] = kv.split("=");
-                      if (k) searchObj[decodeURIComponent(k)] = decodeURIComponent(v);
+                {(() => {
+                  const allItems = getNavigationItems(session);
+                  return allItems.map((item) => {
+                    const [pathOnly, queryStr] = item.url.split("?");
+                    const itemSearch: Record<string, string> = {};
+                    if (queryStr) {
+                      for (const kv of queryStr.split("&")) {
+                        const [k, v = ""] = kv.split("=");
+                        if (k) itemSearch[decodeURIComponent(k)] = decodeURIComponent(v);
+                      }
                     }
-                  }
-                  const isActive = pathname === pathOnly;
-                  return (
-                    <SidebarMenuItem key={item.title}>
-                      <SidebarMenuButton
-                        asChild
-                        isActive={isActive}
-                        tooltip={item.title}
-                      >
-                        <Link to={pathOnly} search={queryStr ? (searchObj as never) : undefined}>
-                          <item.icon size={16} />
-                          <span>{item.title}</span>
-                        </Link>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  );
-                })}
+                    // Active resolution: when multiple sidebar items share a
+                    // base path (e.g. Analytics → `/analytics`, Funnels →
+                    // `/analytics?tab=funnels`), only the entry whose query
+                    // matches the current URL should highlight. The plain
+                    // "Analytics" item is active only when no query-bearing
+                    // sibling matches the current search.
+                    const pathMatches = pathname === pathOnly;
+                    let isActive = pathMatches;
+                    if (pathMatches) {
+                      const matches = (params: Record<string, string>) =>
+                        Object.entries(params).every(
+                          ([k, v]) => String((searchObj?.[k] as string | number | undefined) ?? "") === v,
+                        );
+                      if (queryStr) {
+                        isActive = matches(itemSearch);
+                      } else {
+                        const querySiblings = allItems.filter(
+                          (s) => s.url.split("?")[0] === pathOnly && s.url.includes("?"),
+                        );
+                        const siblingActive = querySiblings.some((s) => {
+                          const sq = s.url.split("?")[1] ?? "";
+                          const sParams: Record<string, string> = {};
+                          for (const kv of sq.split("&")) {
+                            const [k, v = ""] = kv.split("=");
+                            if (k) sParams[decodeURIComponent(k)] = decodeURIComponent(v);
+                          }
+                          return matches(sParams);
+                        });
+                        isActive = !siblingActive;
+                      }
+                    }
+                    return (
+                      <SidebarMenuItem key={item.title}>
+                        <SidebarMenuButton
+                          asChild
+                          isActive={isActive}
+                          tooltip={item.title}
+                        >
+                          <Link to={pathOnly} search={queryStr ? (itemSearch as never) : undefined}>
+                            <item.icon size={16} />
+                            <span>{item.title}</span>
+                          </Link>
+                        </SidebarMenuButton>
+                      </SidebarMenuItem>
+                    );
+                  });
+                })()}
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>

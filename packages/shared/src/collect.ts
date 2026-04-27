@@ -20,6 +20,44 @@ import {
 import { realtimeHelpers, isRedisConnected } from './redis'
 import { getClientIp } from './get-client-ip'
 
+/**
+ * Generate a cookieless visitor ID from (websiteId, ip, ua, day-salt).
+ * Stable for the same triple within a UTC day, rotates at 00:00 UTC.
+ *
+ * Bun ships `crypto.subtle` natively. We use SHA-256, not a HMAC: there's
+ * no secret to leak, the hash is deliberately one-way for any individual
+ * visitor (you can't recover IP from the hash without iterating the entire
+ * IP space, which the day rotation defeats over time).
+ */
+async function deriveCookielessVisitorId(
+  websiteId: string,
+  ipAddress: string,
+  userAgent: string,
+): Promise<string> {
+  const day = new Date().toISOString().slice(0, 10) // YYYY-MM-DD UTC
+  const input = `${websiteId}|${ipAddress}|${userAgent}|${day}`
+  const data = new TextEncoder().encode(input)
+  const digest = await crypto.subtle.digest('SHA-256', data)
+  const bytes = new Uint8Array(digest)
+  // hex(first 16 bytes) = 32-char id, plenty of entropy and matches the
+  // length of nanoid IDs the SDK produces in cookie mode.
+  let hex = ''
+  for (let i = 0; i < 16; i++) {
+    hex += bytes[i]!.toString(16).padStart(2, '0')
+  }
+  return hex
+}
+
+// Collapse client-supplied device strings into a single canonical casing
+// so "Mobile" / "mobile" / "MOBILE" all group as one row. We can't trust
+// SDKs (or third-party integrations) to be consistent.
+function normalizeDevice(d: string | null | undefined): string | null {
+  if (!d) return null
+  const t = d.trim()
+  if (!t) return null
+  return t[0]!.toUpperCase() + t.slice(1).toLowerCase()
+}
+
 export interface CollectPayload {
   type: 'pageview' | 'event' | 'session'
   trackingCode: string
@@ -85,12 +123,23 @@ export interface RequestContext {
  * silently rejected (bot, blocked IP). Caller returns 404 in that case.
  */
 export function createRequestContext(req: Request): RequestContext | null {
-  if (isBotRequest(req.headers.get('user-agent'))) return null
+  const ua = req.headers.get('user-agent')
+  if (isBotRequest(ua)) {
+    if (process.env.LOG_FILTERED_REQUESTS === '1') {
+      console.log(`[ctx-filtered] reason=bot ua=${JSON.stringify(ua)}`)
+    }
+    return null
+  }
   const ipAddress = getClientIp(req.headers)
-  if (isIpBlocked(ipAddress)) return null
+  if (isIpBlocked(ipAddress)) {
+    if (process.env.LOG_FILTERED_REQUESTS === '1') {
+      console.log(`[ctx-filtered] reason=ip ip=${ipAddress}`)
+    }
+    return null
+  }
   return {
     ipAddress,
-    headerUserAgent: req.headers.get('user-agent') || 'unknown',
+    headerUserAgent: ua || 'unknown',
     headers: req.headers,
   }
 }
@@ -121,7 +170,8 @@ export async function processEvent(
   payload: CollectPayload,
   ctx: RequestContext
 ): Promise<CollectResult> {
-  const { type, trackingCode, visitorId, sessionId } = payload
+  const { type, trackingCode, sessionId } = payload
+  let { visitorId } = payload
 
   if (!trackingCode || !visitorId || !sessionId) {
     return { success: false, error: 'Missing required fields' }
@@ -129,6 +179,19 @@ export async function processEvent(
 
   const website = await getActiveWebsiteByTrackingCode(trackingCode)
   if (!website) return { success: false, error: 'Invalid tracking code' }
+
+  // Cookieless mode: ignore the client-supplied visitorId (which would have
+  // been a fresh random per page load if the SDK skipped storage) and derive
+  // a stable-per-day, per-website hash. Same UA+IP+website yields the same
+  // visitorId for the day → same-day session continuity, no PII stored, and
+  // the value rotates at midnight UTC so we never build a long-term profile.
+  if (website.cookielessMode) {
+    visitorId = await deriveCookielessVisitorId(
+      website.id,
+      ctx.ipAddress,
+      payload.userAgent || ctx.headerUserAgent,
+    )
+  }
 
   const websiteId = website.id
   const geoData = await getGeoLocation(ctx.ipAddress, ctx.headers)
@@ -140,7 +203,7 @@ export async function processEvent(
     userAgent: payload.userAgent || ctx.headerUserAgent,
     browser: payload.browser,
     os: payload.os,
-    device: payload.device,
+    device: normalizeDevice(payload.device) ?? undefined,
     screenResolution: payload.screenResolution,
     viewport: payload.viewport,
     language: payload.language,
@@ -210,7 +273,7 @@ export async function processEvent(
             page,
             country: geoData.country ?? undefined,
             city: geoData.city ?? undefined,
-            device: payload.device,
+            device: normalizeDevice(payload.device) ?? undefined,
             browser: payload.browser,
           })
           .catch((err) => console.error('Redis error:', err))

@@ -5,6 +5,7 @@ import { websites } from "@ninelytics/db/schema"
 type CachedWebsite = {
   id: string
   excludedPaths: string[]
+  cookielessMode: boolean
   expiry: number
 }
 
@@ -18,7 +19,11 @@ export async function getActiveWebsiteByTrackingCode(trackingCode: string) {
   }
 
   const rows = await db
-    .select({ id: websites.id, excludedPaths: websites.excludedPaths })
+    .select({
+      id: websites.id,
+      excludedPaths: websites.excludedPaths,
+      cookielessMode: websites.cookielessMode,
+    })
     .from(websites)
     .where(and(eq(websites.trackingCode, trackingCode), eq(websites.status, "ACTIVE")))
     .limit(1)
@@ -31,6 +36,7 @@ export async function getActiveWebsiteByTrackingCode(trackingCode: string) {
   const website = {
     id: rows[0].id,
     excludedPaths: (rows[0].excludedPaths as string[] | null) ?? [],
+    cookielessMode: rows[0].cookielessMode ?? false,
     expiry: Date.now() + CACHE_TTL_MS,
   }
 

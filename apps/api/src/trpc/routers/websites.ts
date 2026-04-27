@@ -51,6 +51,7 @@ const updateWebsiteSchema = z.object({
     }),
     privacyPolicyUrl: z.string().optional(),
   }).nullable().optional(),
+  cookielessMode: z.boolean().optional(),
 })
 
 const ensureAccess = async (db: typeof import("@ninelytics/shared/db").db, websiteId: string, userId: string, requireWrite = false) => {
@@ -253,8 +254,8 @@ export const websitesRouter = router({
           w.google_analytics_property_id, w.google_analytics_synced_at,
           w.owner_name, w.owner_email,
           (SELECT COUNT(*) FROM page_views pv WHERE pv.website_id = w.id AND pv.timestamp >= NOW() - INTERVAL '7 days') as views_last_7_days,
-          (SELECT COUNT(DISTINCT pv2.visitor_id) FROM page_views pv2 WHERE pv2.website_id = w.id AND pv2.timestamp >= ((NOW() AT TIME ZONE ${tz})::date)::timestamp AT TIME ZONE ${tz}) as visitors_today,
-          (SELECT COUNT(DISTINCT pv4.visitor_id) FROM page_views pv4 WHERE pv4.website_id = w.id AND pv4.timestamp >= (((NOW() AT TIME ZONE ${tz})::date - 1)::timestamp AT TIME ZONE ${tz}) AND pv4.timestamp < (((NOW() AT TIME ZONE ${tz})::date)::timestamp AT TIME ZONE ${tz})) as visitors_yesterday,
+          (SELECT COUNT(DISTINCT pv2.visitor_id) FROM page_views pv2 WHERE pv2.website_id = w.id AND (pv2.timestamp AT TIME ZONE 'UTC') >= ((NOW() AT TIME ZONE ${tz})::date)::timestamp AT TIME ZONE ${tz}) as visitors_today,
+          (SELECT COUNT(DISTINCT pv4.visitor_id) FROM page_views pv4 WHERE pv4.website_id = w.id AND (pv4.timestamp AT TIME ZONE 'UTC') >= (((NOW() AT TIME ZONE ${tz})::date - 1)::timestamp AT TIME ZONE ${tz}) AND (pv4.timestamp AT TIME ZONE 'UTC') < (((NOW() AT TIME ZONE ${tz})::date)::timestamp AT TIME ZONE ${tz})) as visitors_yesterday,
           COALESCE(EXTRACT(DAY FROM NOW() - (SELECT MIN(pv5.timestamp) FROM page_views pv5 WHERE pv5.website_id = w.id))::int, 0) as total_analytics_data,
           (SELECT json_agg(row_to_json(d)) FROM (
             SELECT to_char((pv3.timestamp AT TIME ZONE 'UTC' AT TIME ZONE ${tz})::date, 'YYYY-MM-DD') as date, COUNT(*)::int as views
@@ -662,11 +663,13 @@ export const websitesRouter = router({
           .from(pageViews).where(and(eq(pageViews.websiteId, id), sql`${pageViews.timestamp} >= ${last30Days.toISOString()}`)),
         ctx.db.select({ count: sql<number>`count(*)` })
           .from(pageViews).where(and(eq(pageViews.websiteId, id), sql`${pageViews.timestamp} >= ${last30Days.toISOString()}`)),
-        // Today stats — use range scan for index efficiency
+        // Today stats — anchor LHS as UTC so the comparison doesn't depend on the
+        // postgres session timezone (page_views.timestamp is `timestamp without
+        // time zone` storing UTC values).
         ctx.db.select({ count: sql<number>`count(DISTINCT ${pageViews.visitorId})` })
-          .from(pageViews).where(and(eq(pageViews.websiteId, id), sql`${pageViews.timestamp} >= ((NOW() AT TIME ZONE ${tz})::date)::timestamp AT TIME ZONE ${tz}`)),
+          .from(pageViews).where(and(eq(pageViews.websiteId, id), sql`(${pageViews.timestamp} AT TIME ZONE 'UTC') >= ((NOW() AT TIME ZONE ${tz})::date)::timestamp AT TIME ZONE ${tz}`)),
         ctx.db.select({ count: sql<number>`count(*)` })
-          .from(pageViews).where(and(eq(pageViews.websiteId, id), sql`${pageViews.timestamp} >= ((NOW() AT TIME ZONE ${tz})::date)::timestamp AT TIME ZONE ${tz}`)),
+          .from(pageViews).where(and(eq(pageViews.websiteId, id), sql`(${pageViews.timestamp} AT TIME ZONE 'UTC') >= ((NOW() AT TIME ZONE ${tz})::date)::timestamp AT TIME ZONE ${tz}`)),
         // Session stats
         ctx.db.select({
           totalSessions: sql<number>`count(*)`,

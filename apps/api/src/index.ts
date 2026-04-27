@@ -8,15 +8,34 @@ import { batch } from '@/routes/batch'
 import { track } from '@/routes/track'
 import { vitals } from '@/routes/vitals'
 import { websitesConfig } from '@/routes/websites-config'
+import { publicShare } from '@/routes/public-share'
 import { aiChat } from '@/routes/ai-chat'
 import { trpc } from '@/routes/trpc'
 import { auth } from '@/routes/auth'
+import { ensureMaxmindDatabase } from '@ninelytics/shared/maxmind-updater'
+
+// Fire-and-forget at boot. Downloads / refreshes the local GeoLite2-City
+// database when MAXMIND_LICENSE_KEY is set. Without this the geolocation
+// service silently falls back to ip-api.com (45 req/min hard rate limit).
+void ensureMaxmindDatabase()
 
 const app = new Hono()
 
 // ─── Global middleware ──────────────────────────────────────────────────────
 app.use('*', logger())
-app.use('*', secureHeaders())
+// `secureHeaders()` defaults emit `Cross-Origin-Resource-Policy: same-origin`
+// which makes cross-origin browsers refuse to read responses from our public
+// tracking endpoints (analytics.js → /api/collect, speed-insights.js →
+// /api/vitals, etc.) with ERR_BLOCKED_BY_RESPONSE.NotSameOrigin. The API is
+// designed to be called from any origin, so opt every response into being
+// cross-origin readable. Per-route CORS still controls which origins are
+// allowed; this header just controls *embeddability*.
+app.use(
+  '*',
+  secureHeaders({
+    crossOriginResourcePolicy: 'cross-origin',
+  })
+)
 
 // CORS is tight by default — tracking endpoints override this per-route.
 app.use(
@@ -57,6 +76,10 @@ app.use(
   '/api/websites/config/*',
   cors({ origin: '*', allowMethods: ['GET', 'OPTIONS'], allowHeaders: ['Content-Type'] })
 )
+app.use(
+  '/api/public/share/*',
+  cors({ origin: '*', allowMethods: ['GET', 'OPTIONS'], allowHeaders: ['Content-Type'] })
+)
 
 // ─── Routes ─────────────────────────────────────────────────────────────────
 app.route('/api/health', health)
@@ -65,6 +88,7 @@ app.route('/api/batch', batch)
 app.route('/api/track', track)
 app.route('/api/vitals', vitals)
 app.route('/api/websites/config', websitesConfig)
+app.route('/api/public/share', publicShare)
 app.route('/api/trpc', trpc)
 app.route('/api/auth', auth)
 app.route('/api/ai-chat', aiChat)

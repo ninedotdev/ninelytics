@@ -20,6 +20,7 @@ websitesConfig.get('/:trackingCode', async (c) => {
         excludedPaths: websites.excludedPaths,
         cookieConsent: websites.cookieConsent,
         speedInsightsEnabled: websites.speedInsightsEnabled,
+        cookielessMode: websites.cookielessMode,
       })
       .from(websites)
       .where(and(eq(websites.trackingCode, trackingCode), eq(websites.status, 'ACTIVE')))
@@ -31,6 +32,7 @@ websitesConfig.get('/:trackingCode', async (c) => {
       excludedPaths: (row.excludedPaths as string[] | null) ?? [],
       cookieConsent: row.cookieConsent ?? null,
       speedInsights: row.speedInsightsEnabled ?? false,
+      cookielessMode: row.cookielessMode ?? false,
     })
   } catch (error) {
     console.error('Error fetching website config:', error)

@@ -180,4 +180,5 @@ export const cloudflareRouter = router({
         dateRange: cfData.length > 0 ? { from: cfData[0].date, to: cfData[cfData.length - 1].date } : null,
       }
     }),
+
 })

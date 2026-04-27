@@ -114,6 +114,21 @@ function DocsPage() {
         </Card>
 
         <Card>
+          <CardHeader><CardTitle className="text-sm font-medium">Enhanced geolocation (optional)</CardTitle></CardHeader>
+          <CardContent className="space-y-3 text-sm text-muted-foreground">
+            <p>
+              By default Cloudflare only sends the visitor&apos;s country to your origin. Enable <strong>Add visitor location headers</strong> in your Cloudflare dashboard to also receive <strong>city, region, postal code, latitude/longitude and timezone</strong> &mdash; this app reads them automatically.
+            </p>
+            <p>
+              In Cloudflare: <strong>your domain &rarr; Rules &rarr; Transform Rules &rarr; Managed Transforms</strong>, then toggle <em>Add visitor location headers</em> on. Available on every plan including Free.
+            </p>
+            <p className="text-xs">
+              City data resolved at Cloudflare&apos;s edge is generally more accurate than IP-database lookups, especially for VPN, IPv6 and CGNAT traffic. Without it, the app falls back to MaxMind GeoLite2 which is also free but slightly less precise.
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card>
           <CardHeader><CardTitle className="text-sm font-medium">How data merges</CardTitle></CardHeader>
           <CardContent className="space-y-3 text-sm text-muted-foreground">
             <p>

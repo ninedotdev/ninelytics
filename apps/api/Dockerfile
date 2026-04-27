@@ -47,4 +47,8 @@ EXPOSE 3001
 ENV PORT=3001
 
 WORKDIR /app/apps/api
-CMD ["bun", "run", "src/index.ts"]
+# Entrypoint script runs `drizzle-kit push --force` to apply schema diffs
+# (idempotent: no-op when there's nothing new) and sets up TimescaleDB
+# hypertables on first boot, then execs the API server. Without this,
+# adding a column to packages/db/src/schema.ts wouldn't reach the live DB.
+CMD ["sh", "/app/scripts/api-entrypoint.sh"]
