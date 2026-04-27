@@ -10,7 +10,11 @@ export function getRouter() {
     defaultOptions: {
       queries: {
         refetchOnWindowFocus: false,
-        staleTime: 60_000,
+        // Short staleTime so analytics counters feel live. Combined with the
+        // server-side Redis cache (15s TTL on heavy queries), worst-case
+        // staleness for "visitors today" is ~30s — much better than the
+        // previous 60+45s = 105s.
+        staleTime: 15_000,
         gcTime: 5 * 60_000,
       },
     },

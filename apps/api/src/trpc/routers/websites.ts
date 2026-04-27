@@ -212,7 +212,7 @@ export const websitesRouter = router({
       const offset = (page - 1) * pageSize
 
       const cacheKey = `websites:optimized:${userId}:${tz}:${page}:${pageSize}`
-      return withQueryCache(cacheKey, 45, async () => {
+      return withQueryCache(cacheKey, 15, async () => {
 
       // Total count of accessible websites
       const totalResult = await ctx.db.execute<{ total: number }>(sql`
@@ -536,6 +536,9 @@ export const websitesRouter = router({
         throw new Error("Website not found")
       }
 
+      const cacheKey = `websites:stats:${id}:${period}:${tz}`
+      return withQueryCache(cacheKey, 15, async () => {
+
       const periodDays = period === "1d" ? 1 : period === "7d" ? 7 : period === "30d" ? 30 : 90
       const daysBack = period === "1d" ? 0 : periodDays
 
@@ -857,6 +860,7 @@ export const websitesRouter = router({
           lastActivity: lastActivity?.timestamp || null,
         },
       }
+      })
     }),
 
   cleanupData: protectedProcedure

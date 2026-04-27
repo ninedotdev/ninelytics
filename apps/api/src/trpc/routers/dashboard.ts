@@ -182,7 +182,7 @@ export const dashboardRouter = router({
       const targetIds = input?.websiteId ? [input.websiteId] : allWebsiteIds
       const cacheKey = `dashboard:map:${userId}:${input?.websiteId ?? 'all'}`
 
-      return withQueryCache(cacheKey, 45, async () => {
+      return withQueryCache(cacheKey, 15, async () => {
       const now = new Date()
       const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
       const fourteenDaysAgo = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000)

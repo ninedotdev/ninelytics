@@ -4,9 +4,11 @@
  * (DELETE in tRPC `shareLinks.revoke`) immediately disables the URL.
  *
  * Mirrors a subset of `websites.stats` (the bits a public viewer cares
- * about: totals, top pages/countries/devices/browsers, daily chart) and
- * deliberately does NOT expose visitor IPs, individual session detail,
- * or any other PII.
+ * about: KPIs, ring breakdowns, referrers, daily chart) and deliberately
+ * does NOT expose visitor IPs, individual session detail, or any PII.
+ *
+ * Cached in Redis (60s) to absorb re-shares / refreshes without re-running
+ * 8 aggregate queries on every request.
  */
 import { Hono } from 'hono'
 import { and, desc, eq, isNotNull, sql } from 'drizzle-orm'
@@ -19,6 +21,7 @@ import {
   visitorSessions,
 } from '@ninelytics/db/schema'
 import { tzDate, safeTimezone } from '@ninelytics/shared/timezone'
+import { withQueryCache } from '@ninelytics/shared/query-cache'
 
 export const publicShare = new Hono()
 
@@ -60,89 +63,8 @@ publicShare.get('/:token', async (c) => {
   const periodDays = period === '1d' ? 1 : period === '7d' ? 7 : period === '30d' ? 30 : 90
   const periodStartIso = new Date(Date.now() - periodDays * 24 * 60 * 60 * 1000).toISOString()
 
-  const [
-    totals,
-    topPagesData,
-    topCountriesData,
-    deviceData,
-    browserData,
-    chartRaw,
-  ] = await Promise.all([
-    db
-      .select({
-        pageViews: sql<number>`count(*)`,
-        visitors: sql<number>`count(DISTINCT ${pageViews.visitorId})`,
-        sessions: sql<number>`count(DISTINCT ${pageViews.sessionId})`,
-      })
-      .from(pageViews)
-      .where(
-        and(
-          eq(pageViews.websiteId, website.id),
-          sql`${pageViews.timestamp} >= ${periodStartIso}`,
-        ),
-      ),
-    db
-      .select({
-        page: pageViews.page,
-        count: sql<number>`count(*)`,
-      })
-      .from(pageViews)
-      .where(
-        and(
-          eq(pageViews.websiteId, website.id),
-          sql`${pageViews.timestamp} >= ${periodStartIso}`,
-        ),
-      )
-      .groupBy(pageViews.page)
-      .orderBy(desc(sql`count(*)`))
-      .limit(10),
-    db
-      .select({
-        country: visitors.country,
-        count: sql<number>`count(DISTINCT ${visitors.visitorId})`,
-      })
-      .from(visitors)
-      .where(and(eq(visitors.websiteId, website.id), isNotNull(visitors.country)))
-      .groupBy(visitors.country)
-      .orderBy(desc(sql`count(DISTINCT ${visitors.visitorId})`))
-      .limit(10),
-    db
-      .select({
-        device: visitors.device,
-        count: sql<number>`count(DISTINCT ${visitors.visitorId})`,
-      })
-      .from(visitors)
-      .where(and(eq(visitors.websiteId, website.id), isNotNull(visitors.device)))
-      .groupBy(visitors.device)
-      .orderBy(desc(sql`count(DISTINCT ${visitors.visitorId})`)),
-    db
-      .select({
-        browser: visitors.browser,
-        count: sql<number>`count(DISTINCT ${visitors.visitorId})`,
-      })
-      .from(visitors)
-      .where(and(eq(visitors.websiteId, website.id), isNotNull(visitors.browser)))
-      .groupBy(visitors.browser)
-      .orderBy(desc(sql`count(DISTINCT ${visitors.visitorId})`))
-      .limit(10),
-    db
-      .select({
-        day: sql<string>`${sql.raw(tzDate('"page_views"."timestamp"', tz))}::text`,
-        views: sql<number>`count(*)`,
-        visitors: sql<number>`count(DISTINCT ${pageViews.visitorId})`,
-      })
-      .from(pageViews)
-      .where(
-        and(
-          eq(pageViews.websiteId, website.id),
-          sql`${pageViews.timestamp} >= ${periodStartIso}`,
-        ),
-      )
-      .groupBy(sql.raw(tzDate('"page_views"."timestamp"', tz)))
-      .orderBy(sql.raw(tzDate('"page_views"."timestamp"', tz))),
-  ])
-
-  // Bump view counters (fire-and-forget; don't block the response).
+  // Count counter fire-and-forget (outside the cache so refreshes still
+  // bump the counter even when the response itself is served from cache).
   void db
     .update(websiteShareLinks)
     .set({
@@ -152,28 +74,209 @@ publicShare.get('/:token', async (c) => {
     .where(eq(websiteShareLinks.id, link.id))
     .catch(() => undefined)
 
-  const t = totals[0] ?? { pageViews: 0, visitors: 0, sessions: 0 }
-  return c.json({
-    website: { name: website.name, url: website.url, createdAt: website.createdAt },
-    label: link.label,
-    period,
-    timezone: tz,
-    totals: {
-      pageViews: Number(t.pageViews ?? 0),
-      visitors: Number(t.visitors ?? 0),
-      sessions: Number(t.sessions ?? 0),
-    },
-    topPages: topPagesData.map((p) => ({ page: p.page, count: Number(p.count) })),
-    topCountries: topCountriesData.map((c) => ({
-      country: c.country ?? 'Unknown',
-      count: Number(c.count),
-    })),
-    devices: deviceData.map((d) => ({ device: d.device ?? 'Unknown', count: Number(d.count) })),
-    browsers: browserData.map((b) => ({ browser: b.browser ?? 'Unknown', count: Number(b.count) })),
-    chart: chartRaw.map((r) => ({ day: r.day, views: Number(r.views), visitors: Number(r.visitors) })),
-  })
-})
+  const cacheKey = `share:${link.id}:${period}:${tz}`
+  const payload = await withQueryCache(cacheKey, 60, async () => {
+    const [
+      totals,
+      sessionAgg,
+      topPagesData,
+      topCountriesData,
+      deviceData,
+      browserData,
+      osData,
+      topReferrersData,
+      trafficSourcesData,
+      chartRaw,
+    ] = await Promise.all([
+      db
+        .select({
+          pageViews: sql<number>`count(*)`,
+          visitors: sql<number>`count(DISTINCT ${pageViews.visitorId})`,
+          sessions: sql<number>`count(DISTINCT ${pageViews.sessionId})`,
+        })
+        .from(pageViews)
+        .where(
+          and(
+            eq(pageViews.websiteId, website.id),
+            sql`${pageViews.timestamp} >= ${periodStartIso}`,
+          ),
+        ),
+      db
+        .select({
+          totalSessions: sql<number>`count(*)`,
+          bouncedSessions: sql<number>`count(*) FILTER (WHERE ${visitorSessions.isBounce} = true)`,
+          avgDuration: sql<number>`coalesce(avg(${visitorSessions.duration}) FILTER (WHERE ${visitorSessions.duration} IS NOT NULL AND ${visitorSessions.duration} > 0), 0)`,
+        })
+        .from(visitorSessions)
+        .where(
+          and(
+            eq(visitorSessions.websiteId, website.id),
+            sql`${visitorSessions.startTime} >= ${periodStartIso}`,
+          ),
+        ),
+      db
+        .select({
+          page: pageViews.page,
+          count: sql<number>`count(*)`,
+        })
+        .from(pageViews)
+        .where(
+          and(
+            eq(pageViews.websiteId, website.id),
+            sql`${pageViews.timestamp} >= ${periodStartIso}`,
+          ),
+        )
+        .groupBy(pageViews.page)
+        .orderBy(desc(sql`count(*)`))
+        .limit(10),
+      db
+        .select({
+          country: visitors.country,
+          count: sql<number>`count(DISTINCT ${visitors.visitorId})`,
+        })
+        .from(visitors)
+        .where(
+          and(
+            eq(visitors.websiteId, website.id),
+            isNotNull(visitors.country),
+            sql`${visitors.lastVisit} >= ${periodStartIso}`,
+          ),
+        )
+        .groupBy(visitors.country)
+        .orderBy(desc(sql`count(DISTINCT ${visitors.visitorId})`))
+        .limit(10),
+      db
+        .select({
+          device: visitors.device,
+          count: sql<number>`count(DISTINCT ${visitors.visitorId})`,
+        })
+        .from(visitors)
+        .where(
+          and(
+            eq(visitors.websiteId, website.id),
+            isNotNull(visitors.device),
+            sql`${visitors.lastVisit} >= ${periodStartIso}`,
+          ),
+        )
+        .groupBy(visitors.device)
+        .orderBy(desc(sql`count(DISTINCT ${visitors.visitorId})`)),
+      db
+        .select({
+          browser: visitors.browser,
+          count: sql<number>`count(DISTINCT ${visitors.visitorId})`,
+        })
+        .from(visitors)
+        .where(
+          and(
+            eq(visitors.websiteId, website.id),
+            isNotNull(visitors.browser),
+            sql`${visitors.lastVisit} >= ${periodStartIso}`,
+          ),
+        )
+        .groupBy(visitors.browser)
+        .orderBy(desc(sql`count(DISTINCT ${visitors.visitorId})`))
+        .limit(10),
+      db
+        .select({
+          os: visitors.os,
+          count: sql<number>`count(DISTINCT ${visitors.visitorId})`,
+        })
+        .from(visitors)
+        .where(
+          and(
+            eq(visitors.websiteId, website.id),
+            isNotNull(visitors.os),
+            sql`${visitors.lastVisit} >= ${periodStartIso}`,
+          ),
+        )
+        .groupBy(visitors.os)
+        .orderBy(desc(sql`count(DISTINCT ${visitors.visitorId})`))
+        .limit(10),
+      db
+        .select({
+          referrer: sql<string>`coalesce(${visitorSessions.referrerDomain}, ${visitorSessions.referrer}, 'direct')`,
+          count: sql<number>`count(*)`,
+        })
+        .from(visitorSessions)
+        .where(
+          and(
+            eq(visitorSessions.websiteId, website.id),
+            sql`${visitorSessions.startTime} >= ${periodStartIso}`,
+          ),
+        )
+        .groupBy(sql`coalesce(${visitorSessions.referrerDomain}, ${visitorSessions.referrer}, 'direct')`)
+        .orderBy(desc(sql`count(*)`))
+        .limit(8),
+      db
+        .select({
+          source: sql<string>`coalesce(${visitorSessions.utmSource}, ${visitorSessions.source}, 'direct')`,
+          count: sql<number>`count(*)`,
+        })
+        .from(visitorSessions)
+        .where(
+          and(
+            eq(visitorSessions.websiteId, website.id),
+            sql`${visitorSessions.startTime} >= ${periodStartIso}`,
+          ),
+        )
+        .groupBy(sql`coalesce(${visitorSessions.utmSource}, ${visitorSessions.source}, 'direct')`)
+        .orderBy(desc(sql`count(*)`))
+        .limit(8),
+      db
+        .select({
+          day: sql<string>`${sql.raw(tzDate('"page_views"."timestamp"', tz))}::text`,
+          views: sql<number>`count(*)`,
+          visitors: sql<number>`count(DISTINCT ${pageViews.visitorId})`,
+        })
+        .from(pageViews)
+        .where(
+          and(
+            eq(pageViews.websiteId, website.id),
+            sql`${pageViews.timestamp} >= ${periodStartIso}`,
+          ),
+        )
+        .groupBy(sql.raw(tzDate('"page_views"."timestamp"', tz)))
+        .orderBy(sql.raw(tzDate('"page_views"."timestamp"', tz))),
+    ])
 
-// Suppress unused-import warning if the visitorSessions reference isn't
-// needed; it's reserved for future fields like avg session duration.
-void visitorSessions
+    const t = totals[0] ?? { pageViews: 0, visitors: 0, sessions: 0 }
+    const s = sessionAgg[0] ?? { totalSessions: 0, bouncedSessions: 0, avgDuration: 0 }
+    const totalSessions = Number(s.totalSessions ?? 0)
+    const bounceRate = totalSessions > 0
+      ? Math.round((Number(s.bouncedSessions ?? 0) / totalSessions) * 1000) / 10
+      : 0
+
+    return {
+      website: { name: website.name, url: website.url, createdAt: website.createdAt },
+      label: link.label,
+      period,
+      timezone: tz,
+      totals: {
+        pageViews: Number(t.pageViews ?? 0),
+        visitors: Number(t.visitors ?? 0),
+        sessions: Number(t.sessions ?? 0),
+        bounceRate,
+        avgSessionDuration: Math.round(Number(s.avgDuration ?? 0)),
+      },
+      topPages: topPagesData.map((p) => ({ page: p.page, count: Number(p.count) })),
+      topCountries: topCountriesData.map((c) => ({
+        country: c.country ?? 'Unknown',
+        count: Number(c.count),
+      })),
+      devices: deviceData.map((d) => ({ device: d.device ?? 'Unknown', count: Number(d.count) })),
+      browsers: browserData.map((b) => ({ browser: b.browser ?? 'Unknown', count: Number(b.count) })),
+      os: osData.map((o) => ({ os: o.os ?? 'Unknown', count: Number(o.count) })),
+      topReferrers: topReferrersData.map((r) => ({
+        referrer: r.referrer ?? 'direct',
+        count: Number(r.count),
+      })),
+      trafficSources: trafficSourcesData.map((s) => ({
+        source: s.source ?? 'direct',
+        count: Number(s.count),
+      })),
+      chart: chartRaw.map((r) => ({ day: r.day, views: Number(r.views), visitors: Number(r.visitors) })),
+    }
+  })
+
+  return c.json(payload)
+})
