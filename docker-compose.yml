@@ -30,9 +30,13 @@ services:
       AUTH_TYPE: scram-sha-256
       POOL_MODE: transaction
       MAX_CLIENT_CONN: 1000
-      DEFAULT_POOL_SIZE: 20
-      MIN_POOL_SIZE: 5
-      RESERVE_POOL_SIZE: 5
+      # Pool sized for the tracking worker: 4 shards × 8 concurrency × ~3
+      # DB calls = ~96 in-flight ops worst case. 50 server connections plus
+      # 10 reserve gives the api breathing room without blowing past
+      # Postgres' default max_connections (~100).
+      DEFAULT_POOL_SIZE: 50
+      MIN_POOL_SIZE: 10
+      RESERVE_POOL_SIZE: 10
       SERVER_RESET_QUERY: DISCARD ALL
       IGNORE_STARTUP_PARAMETERS: extra_float_digits,statement_timeout,search_path,options
       VERBOSE: 0
@@ -104,14 +108,15 @@ services:
     volumes:
       - maxmind_data:/var/data
     healthcheck:
-      # start_period bumped to 90s so the drizzle-kit push in the entrypoint
-      # has time to run before healthcheck failures count. Post-migrate the
-      # /api/health response is ~1ms.
+      # start_period generous so drizzle-kit push has time to apply CREATE
+      # INDEX on big tables (visitors / page_views can be hundreds of
+      # thousands of rows; non-CONCURRENT index creation blocks for
+      # minutes). Post-migrate the /api/health response is ~1ms.
       test: ["CMD-SHELL", "wget -qO- --timeout=3 http://localhost:3001/api/health || exit 1"]
       interval: 30s
       timeout: 5s
       retries: 3
-      start_period: 90s
+      start_period: 300s
     mem_limit: 1536m
     mem_reservation: 512m
     networks:
@@ -178,15 +183,15 @@ services:
       api:
         condition: service_healthy
     healthcheck:
-      # /_health bypasses SSR. Interval aggressive so post-deploy the
-      # container flips to 'healthy' in ~3-5s and Traefik routes again.
-      # Without this the default 60s start_period + 30s interval meant
-      # ~90s of 504s after every deploy.
+      # /_health is a pure-bun liveness probe, never touches the api or
+      # SSR. Once Bun is accepting connections, this returns instantly.
+      # start_period covers the cold-load of the SSR bundle (visx,
+      # maplibre, ai-sdk all eager-imported) which can take ~15-30s.
       test: ["CMD-SHELL", "wget -qO- --timeout=2 http://localhost:3000/_health || exit 1"]
       interval: 3s
       timeout: 2s
       retries: 3
-      start_period: 10s
+      start_period: 45s
     mem_limit: 1g
     mem_reservation: 256m
     networks:

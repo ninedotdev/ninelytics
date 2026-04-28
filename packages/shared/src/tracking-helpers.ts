@@ -55,22 +55,14 @@ export async function upsertVisitor(
 ) {
   const nowIso = toIso(new Date())
 
+  // Minimal UPDATE set: a returning visitor only needs `lastVisit` bumped
+  // so "active in last N days" filters work. Browser, OS, device, screen,
+  // language, etc are immutable for a given visitor row — re-writing them
+  // on every event was just taking the row lock with no data change. Geo
+  // fields stay refreshable when a new lookup actually returned a value
+  // (e.g. CF header upgrade for a previously-Unknown country).
   const updateSet: Record<string, unknown> = {
     lastVisit: nowIso,
-    ipAddress: data.ipAddress,
-    userAgent: data.userAgent,
-    browser: data.browser,
-    os: data.os,
-    device: data.device,
-    screenResolution: data.screenResolution,
-    viewport: data.viewport,
-    language: data.language,
-    timezone: data.timezone,
-    connection: data.connection,
-    pixelRatio: data.pixelRatio != null ? String(data.pixelRatio) : null,
-    cookieEnabled: data.cookieEnabled ?? null,
-    doNotTrack: data.doNotTrack ?? null,
-    // Only overwrite geo fields when we have a real value — never wipe with null
     ...(data.country != null && { country: data.country }),
     ...(data.state != null && { state: data.state }),
     ...(data.city != null && { city: data.city }),
@@ -79,15 +71,17 @@ export async function upsertVisitor(
     updatedAt: nowIso,
   }
 
-  if (incrementPageViews) {
-    updateSet.totalPageViews = sql`${visitors.totalPageViews} + 1`
-  }
-  if (incrementSessions) {
-    updateSet.totalSessions = sql`${visitors.totalSessions} + 1`
-  }
+  // Per-event counter increments removed: totalPageViews and totalSessions
+  // are write-only fields no SELECT query reads. The `+ 1` UPDATEs were
+  // creating row-lock contention with no upside — totals are computed at
+  // read time via `count(*)` over page_views / visitor_sessions, which is
+  // already cheap thanks to (website_id, timestamp) and similar indexes.
 
   try {
-    const [result] = await db
+    // No RETURNING — the result is never read (callers await for the
+    // side-effect only). Returning the full row was costing ~20 columns
+    // of serialization per insert × 3 round-trips per pageview.
+    await db
       .insert(visitors)
       .values({
         websiteId: data.websiteId,
@@ -121,12 +115,9 @@ export async function upsertVisitor(
         target: [visitors.websiteId, visitors.visitorId],
         set: updateSet as Partial<InferInsertModel<typeof visitors>>,
       })
-      .returning()
-
-    return result
   } catch (e: unknown) {
     // FK violation = website was deleted between check and insert — ignore
-    if (e instanceof Error && e.message.includes("foreign key constraint")) return null
+    if (e instanceof Error && e.message.includes("foreign key constraint")) return
     throw e
   }
 }
@@ -137,33 +128,19 @@ export async function upsertSession(
 ) {
   const nowIso = toIso(new Date())
 
-  const updateSet: Record<string, unknown> = {
-    endTime: nowIso,
-    updatedAt: nowIso,
-    // Only overwrite source/UTM/referrer fields when we have a real value —
-    // never wipe with null (pageview route calls upsertSession without these fields)
-    ...(data.referrer != null && { referrer: data.referrer }),
-    ...(data.landingPage != null && { landingPage: data.landingPage }),
-    ...(data.exitPage != null && { exitPage: data.exitPage }),
-    ...(data.utmSource != null && { utmSource: data.utmSource }),
-    ...(data.utmMedium != null && { utmMedium: data.utmMedium }),
-    ...(data.utmCampaign != null && { utmCampaign: data.utmCampaign }),
-    ...(data.utmTerm != null && { utmTerm: data.utmTerm }),
-    ...(data.utmContent != null && { utmContent: data.utmContent }),
-    ...(data.source != null && { source: data.source }),
-    ...(data.medium != null && { medium: data.medium }),
-    ...(data.referrerDomain != null && { referrerDomain: data.referrerDomain }),
-    ...(data.isSearchEngine != null && { isSearchEngine: data.isSearchEngine }),
-    ...(data.searchEngine != null && { searchEngine: data.searchEngine }),
-    ...(data.socialNetwork != null && { socialNetwork: data.socialNetwork }),
-  }
-
-  if (incrementPageViews) {
-    updateSet.pageViewCount = sql`${visitorSessions.pageViewCount} + 1`
-  }
-
+  // Sessions are write-once for tracking purposes: the first event creates
+  // the row with full UTM / source / referrer / landing data, and that
+  // row never needs further mutation from the upsert path. duration and
+  // isBounce are written explicitly by the SDK's session-end ping via
+  // updateSessionMetrics, not from here. endTime / exitPage can be
+  // recomputed at read time as MAX(timestamp) / latest-page from
+  // page_views when a dashboard cares.
+  //
+  // Switching to ON CONFLICT DO NOTHING removes the per-event row lock
+  // entirely — concurrent pageviews on the same session no longer
+  // serialize through an UPDATE.
   try {
-    const [result] = await db
+    await db
       .insert(visitorSessions)
       .values({
         websiteId: data.websiteId,
@@ -187,15 +164,11 @@ export async function upsertSession(
         createdAt: nowIso,
         updatedAt: nowIso,
       } satisfies InferInsertModel<typeof visitorSessions>)
-      .onConflictDoUpdate({
+      .onConflictDoNothing({
         target: [visitorSessions.websiteId, visitorSessions.sessionId],
-        set: updateSet as Partial<InferInsertModel<typeof visitorSessions>>,
       })
-      .returning()
-
-    return result
   } catch (e: unknown) {
-    if (e instanceof Error && e.message.includes("foreign key constraint")) return null
+    if (e instanceof Error && e.message.includes("foreign key constraint")) return
     throw e
   }
 }

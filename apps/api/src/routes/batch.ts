@@ -10,6 +10,8 @@ import {
   serializeTrackingRequestContext,
   TrackingQueueFullError,
 } from '@ninelytics/shared/tracking-queue'
+import { updateRealtimeFromCollect } from '@ninelytics/shared/realtime-collect'
+import { getActiveWebsiteByTrackingCode } from '@ninelytics/shared/tracking-websites'
 import { RATE_LIMITS } from '@ninelytics/shared/rate-limiter'
 import { rateLimit } from '@/lib/rate-limit-mw'
 
@@ -31,11 +33,34 @@ batch.post('/', rateLimit(RATE_LIMITS.track!), async (c) => {
     }
 
     const requested = raw.length
-    const events = raw.slice(0, MAX_BATCH_SIZE)
+    const sliced = raw.slice(0, MAX_BATCH_SIZE)
     const truncated = requested > MAX_BATCH_SIZE
+
+    // Drop events for unknown / inactive tracking codes BEFORE enqueueing.
+    // Look ups are Redis-cached so this is per-event ~1ms in the common
+    // case (all events for the same site share a cache hit).
+    const events: CollectPayload[] = []
+    let rejected = 0
+    for (const payload of sliced) {
+      if (!payload.trackingCode) {
+        rejected++
+        continue
+      }
+      const website = await getActiveWebsiteByTrackingCode(payload.trackingCode)
+      if (!website) {
+        rejected++
+        continue
+      }
+      events.push(payload)
+    }
 
     let processed = 0
     let errors = 0
+
+    // Realtime ticker — fire-and-forget for each event.
+    for (const payload of events) {
+      void updateRealtimeFromCollect(payload, ctx)
+    }
 
     // Queue-first path.
     try {
@@ -66,6 +91,7 @@ batch.post('/', rateLimit(RATE_LIMITS.track!), async (c) => {
 
     return c.json({
       requested,
+      rejected,
       processedBatchSize: events.length,
       processed,
       errors,

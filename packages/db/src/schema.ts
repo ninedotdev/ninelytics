@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm"
 import {
+  bigint,
   boolean,
   date,
   decimal,
@@ -745,6 +746,32 @@ export const webVitals = pgTable(
     pk: primaryKey({ columns: [table.id, table.recordedAt] }),
     websiteRecordedIdx: index("web_vitals_website_recorded_idx").on(table.websiteId, table.recordedAt),
     websiteNameIdx: index("web_vitals_website_name_idx").on(table.websiteId, table.name, table.recordedAt),
+  })
+)
+
+/**
+ * Pre-aggregated daily counts written by the worker via batched +N UPDATEs
+ * (~30s flush interval). Dashboards read from here for any window that
+ * doesn't include the current day, dropping per-event scans of the much
+ * larger page_views table to a tiny PK lookup.
+ *
+ * "day" is stored in UTC. Per-timezone reporting boundaries are an
+ * acceptable trade-off — the dashboards still query page_views directly
+ * for the active day where second-precision matters.
+ */
+export const websiteDailyStats = pgTable(
+  "website_daily_stats",
+  {
+    websiteId: text("website_id")
+      .notNull()
+      .references(() => websites.id, { onDelete: "cascade" }),
+    day: date("day", { mode: "string" }).notNull(),
+    pageViews: bigint("page_views", { mode: "number" }).notNull().default(0),
+    updatedAt: timestamp("updated_at", { mode: "string" }).defaultNow().notNull(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.websiteId, table.day] }),
+    idxDay: index("website_daily_stats_day_idx").on(table.day),
   })
 )
 

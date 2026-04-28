@@ -48,13 +48,13 @@
     "./emails/uptime-alert": "./src/emails/uptime-alert.tsx",
     "./multi-tenant": "./src/multi-tenant.ts",
     "./country-names": "./src/country-names.ts",
-    "./event-queue": "./src/event-queue.ts",
-    "./website-stats-cache": "./src/website-stats-cache.ts",
     "./timezone": "./src/timezone.ts",
     "./integration-goals": "./src/integration-goals.ts",
     "./workflow-queue": "./src/workflow-queue.ts",
     "./vitals-queue": "./src/vitals-queue.ts",
-    "./query-cache": "./src/query-cache.ts"
+    "./query-cache": "./src/query-cache.ts",
+    "./realtime-collect": "./src/realtime-collect.ts",
+    "./daily-stats": "./src/daily-stats.ts"
   },
   "dependencies": {
     "@ninelytics/db": "workspace:*",

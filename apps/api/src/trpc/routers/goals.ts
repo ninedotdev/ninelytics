@@ -3,6 +3,18 @@ import { router, protectedProcedure } from "../trpc"
 import { db } from "@ninelytics/shared/db"
 import { goals, websites, userWebsiteAccess, conversions, pageViews, visitors, searchConsoleData, stripeData } from "@ninelytics/db/schema"
 import { eq, and, or, desc, sql, inArray } from "drizzle-orm"
+import { invalidateQueryCacheByPattern } from "@ninelytics/shared/query-cache"
+
+// Goals show on the dashboard map and on websites stats (conversion
+// counters). When goals change, drop the snapshots so the next page
+// load sees the new state instead of waiting up to 15s for the TTL.
+async function invalidateGoalCaches(): Promise<void> {
+  await Promise.all([
+    invalidateQueryCacheByPattern("dashboard:map:*"),
+    invalidateQueryCacheByPattern("websites:optimized:*"),
+    invalidateQueryCacheByPattern("websites:stats:*"),
+  ])
+}
 
 const GOAL_TYPES = ["PAGEVIEW", "EVENT", "DURATION", "REVENUE", "SEARCH_POSITION", "SEARCH_CLICKS"] as const
 
@@ -213,6 +225,8 @@ export const goalsRouter = router({
         .from(conversions)
         .where(eq(conversions.goalId, newGoal.id))
 
+      void invalidateGoalCaches()
+
       return {
         ...newGoal,
         _count: {
@@ -262,6 +276,8 @@ export const goalsRouter = router({
         .from(conversions)
         .where(eq(conversions.goalId, updated.id))
 
+      void invalidateGoalCaches()
+
       return {
         ...updated,
         _count: {
@@ -286,6 +302,8 @@ export const goalsRouter = router({
       }
 
       await ctx.db.delete(goals).where(eq(goals.id, input.id))
+
+      void invalidateGoalCaches()
 
       return { message: "Goal deleted successfully" }
     }),

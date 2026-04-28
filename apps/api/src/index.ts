@@ -13,11 +13,17 @@ import { aiChat } from '@/routes/ai-chat'
 import { trpc } from '@/routes/trpc'
 import { auth } from '@/routes/auth'
 import { ensureMaxmindDatabase } from '@ninelytics/shared/maxmind-updater'
+import { startDailyStatsFlusher } from '@ninelytics/shared/daily-stats'
 
 // Fire-and-forget at boot. Downloads / refreshes the local GeoLite2-City
 // database when MAXMIND_LICENSE_KEY is set. Without this the geolocation
 // service silently falls back to ip-api.com (45 req/min hard rate limit).
 void ensureMaxmindDatabase()
+
+// The api processes events inline when the queue is full / Redis is down.
+// Those code paths call processEvent → bumpDailyPageView, so the api also
+// needs an active flusher to drain its in-memory counters.
+startDailyStatsFlusher()
 
 const app = new Hono()
 

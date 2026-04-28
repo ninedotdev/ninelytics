@@ -45,7 +45,15 @@ function RealtimePage() {
 
   const { data: rawData } = trpc.realtime.byWebsiteId.useQuery(
     { websiteId: selectedWebsite },
-    { enabled: !!selectedWebsite, refetchInterval: 5000, refetchIntervalInBackground: false }
+    {
+      enabled: !!selectedWebsite,
+      refetchInterval: 5000,
+      refetchIntervalInBackground: false,
+      // Override the global 15s staleTime — realtime needs every poll to
+      // actually hit the server, otherwise react-query serves the cached
+      // 15s-old snapshot and the page lies about "live" data.
+      staleTime: 0,
+    }
   );
 
   const data: RealtimeData = (rawData as RealtimeData) ?? {

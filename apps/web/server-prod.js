@@ -30,21 +30,17 @@ export default {
     const url = new URL(req.url)
     const pathname = decodeURIComponent(url.pathname)
 
-    // Healthcheck: also probes the api so Coolify restarts us when the
-    // web↔api path is broken (not just when SSR is up).
+    // Liveness only — answers as long as Bun is accepting connections.
+    // We deliberately do NOT probe the api here: a slow api migration
+    // would otherwise mark the web container unhealthy for minutes, and
+    // Coolify/Traefik would stop routing traffic even though SSR + static
+    // serving are fine. The 25s upstream-timeout in the /api/* proxy is
+    // what protects users from a hung api, not this check.
     if (pathname === '/_health') {
-      try {
-        const r = await fetch(`${API_URL}/api/health`, {
-          signal: AbortSignal.timeout(2000),
-        })
-        if (!r.ok) return new Response('api unhealthy', { status: 503 })
-        return new Response('ok', {
-          status: 200,
-          headers: { 'Content-Type': 'text/plain', 'Cache-Control': 'no-store' },
-        })
-      } catch {
-        return new Response('api unreachable', { status: 503 })
-      }
+      return new Response('ok', {
+        status: 200,
+        headers: { 'Content-Type': 'text/plain', 'Cache-Control': 'no-store' },
+      })
     }
 
     // /api/* → forward to the Hono API container. Same-origin keeps

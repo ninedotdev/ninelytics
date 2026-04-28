@@ -17,8 +17,8 @@ import {
   upsertSession,
   updateSessionMetrics,
 } from './tracking-helpers'
-import { realtimeHelpers, isRedisConnected } from './redis'
 import { getClientIp } from './get-client-ip'
+import { bumpDailyPageView } from './daily-stats'
 
 /**
  * Generate a cookieless visitor ID from (websiteId, ip, ua, day-salt).
@@ -29,7 +29,7 @@ import { getClientIp } from './get-client-ip'
  * visitor (you can't recover IP from the hash without iterating the entire
  * IP space, which the day rotation defeats over time).
  */
-async function deriveCookielessVisitorId(
+export async function deriveCookielessVisitorId(
   websiteId: string,
   ipAddress: string,
   userAgent: string,
@@ -254,41 +254,29 @@ export async function processEvent(
         ),
       ])
 
-      const [pv] = await db
-        .insert(pageViews)
-        .values({
-          websiteId,
-          visitorId,
-          sessionId,
-          page,
-          title: payload.title,
-          referrer,
-          timestamp: parseDate(payload.timestamp),
-        })
-        .returning({ id: pageViews.id })
+      // Insert without RETURNING — the generated id is never read by the
+      // worker or SDK; saves a roundtrip's worth of serialization.
+      await db.insert(pageViews).values({
+        websiteId,
+        visitorId,
+        sessionId,
+        page,
+        title: payload.title,
+        referrer,
+        timestamp: parseDate(payload.timestamp),
+      })
 
-      if (isRedisConnected) {
-        realtimeHelpers
-          .markVisitorActive(websiteId, visitorId, {
-            page,
-            country: geoData.country ?? undefined,
-            city: geoData.city ?? undefined,
-            device: normalizeDevice(payload.device) ?? undefined,
-            browser: payload.browser,
-          })
-          .catch((err) => console.error('Redis error:', err))
-        realtimeHelpers
-          .addLiveEvent(websiteId, {
-            type: 'pageview',
-            name: 'Page View',
-            page,
-            visitorId,
-            timestamp: Date.now(),
-          })
-          .catch((err) => console.error('Redis error:', err))
-      }
+      // Bump the in-memory daily counter. The flusher periodically merges
+      // these into website_daily_stats (single +N UPDATE per website per
+      // flush window), so dashboards can read pageviews from a small
+      // pre-aggregated table instead of scanning page_views every time.
+      bumpDailyPageView(websiteId)
 
-      return { success: true, id: pv?.id }
+      // Realtime ticker writes happen at api request time
+      // (packages/shared/src/realtime-collect.ts), not here. The worker is
+      // responsible only for the persistent DB record.
+
+      return { success: true }
     }
 
     case 'event': {
@@ -326,34 +314,21 @@ export async function processEvent(
           .catch((err) => console.error('Performance metric error:', err))
       }
 
-      const [evt] = await db
-        .insert(events)
-        .values({
-          websiteId,
-          visitorId,
-          sessionId,
-          eventType: payload.eventType,
-          eventName: payload.eventName,
-          page: payload.page,
-          properties: payload.properties || {},
-          timestamp: parseDate(payload.timestamp),
-        })
-        .returning({ id: events.id })
+      await db.insert(events).values({
+        websiteId,
+        visitorId,
+        sessionId,
+        eventType: payload.eventType,
+        eventName: payload.eventName,
+        page: payload.page,
+        properties: payload.properties || {},
+        timestamp: parseDate(payload.timestamp),
+      })
 
-      if (isRedisConnected) {
-        realtimeHelpers
-          .addLiveEvent(websiteId, {
-            type: payload.eventType,
-            name: payload.eventName,
-            page: payload.page,
-            visitorId,
-            timestamp: Date.now(),
-            properties: payload.properties || {},
-          })
-          .catch((err) => console.error('Redis error:', err))
-      }
+      // Realtime live-event writes happen at api request time
+      // (packages/shared/src/realtime-collect.ts), not here.
 
-      return { success: true, id: evt?.id }
+      return { success: true }
     }
 
     case 'session': {
@@ -372,12 +347,13 @@ export async function processEvent(
         return { success: true, updated: true }
       }
 
-      const session = await upsertSession({
+      await upsertSession({
         ...baseSession,
         referrer: payload.referrer,
         landingPage: payload.landingPage,
       })
-      return { success: true, id: session?.id }
+      // Caller only needs the sessionId it already has.
+      return { success: true, id: sessionId }
     }
 
     default:

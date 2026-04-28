@@ -9,8 +9,8 @@ import {
 } from "@/components/ui/map";
 import { IconFocus2, IconWorld } from "@tabler/icons-react";
 import { trpc } from "@/lib/trpc";
-import { OverviewCard } from "./components/overview-card";
-import { BreakdownCard } from "./components/breakdown-card";
+import { OverviewCard } from "@/components/dashboard/overview-card";
+import { BreakdownCard } from "@/components/dashboard/breakdown-card";
 import { Button } from "@/components/ui/button";
 import {
   Select,

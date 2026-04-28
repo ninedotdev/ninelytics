@@ -10,6 +10,8 @@ import {
   serializeTrackingRequestContext,
   TrackingQueueFullError,
 } from '@ninelytics/shared/tracking-queue'
+import { updateRealtimeFromCollect } from '@ninelytics/shared/realtime-collect'
+import { getActiveWebsiteByTrackingCode } from '@ninelytics/shared/tracking-websites'
 import { RATE_LIMITS } from '@ninelytics/shared/rate-limiter'
 import { rateLimit } from '@/lib/rate-limit-mw'
 
@@ -24,6 +26,19 @@ collect.post('/', rateLimit(RATE_LIMITS.track!), async (c) => {
 
     const payload = (await c.req.json()) as CollectPayload
     if (!payload.type) return c.json({ error: 'Missing event type' }, 400)
+    if (!payload.trackingCode) return c.json({ error: 'Missing trackingCode' }, 400)
+
+    // Validate the tracking code against DB (Redis-cached, ~1ms). Any code
+    // that doesn't resolve to an ACTIVE website — purged sites, typos,
+    // copy-pasted snippets from other apps — is rejected here so it never
+    // hits the queue or worker. Browsers receiving 410 should stop the SDK.
+    const website = await getActiveWebsiteByTrackingCode(payload.trackingCode)
+    if (!website) return c.body(null, 410)
+
+    // Realtime ticker — fire-and-forget, runs in parallel with the queue
+    // write so the live page reflects this event in <100ms regardless of
+    // worker backlog.
+    void updateRealtimeFromCollect(payload, ctx)
 
     // Queue-first: return immediately, worker handles DB writes.
     // Inline fallback if Redis is down so we never silently lose events.

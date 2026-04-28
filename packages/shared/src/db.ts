@@ -15,7 +15,10 @@ function init() {
     max: Number(process.env.DATABASE_POOL_SIZE ?? 20),
     idleTimeout: Number(process.env.DATABASE_POOL_TIMEOUT ?? 30),
     connectTimeout: Number(process.env.DATABASE_CONNECT_TIMEOUT ?? 30),
-    queryTimeout: Number(process.env.DATABASE_QUERY_TIMEOUT ?? 60),
+    // Aggressive default so a stuck query (broken pgbouncer connection,
+    // table lock during a CREATE INDEX, etc) fails fast and frees the
+    // connection back to the pool instead of blocking the worker forever.
+    queryTimeout: Number(process.env.DATABASE_QUERY_TIMEOUT ?? 10),
     prepare: false, // pgbouncer transaction mode
   })
   _db = r.db

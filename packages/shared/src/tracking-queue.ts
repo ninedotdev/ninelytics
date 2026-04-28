@@ -15,8 +15,19 @@ import {
  * shard (preserves per-session ordering needed for bounce / duration math),
  * but distribute across shards so a high-traffic site can't head-of-line
  * block low-traffic sites.
+ *
+ * Hardened against bad env values: empty string, "abc", or 0 would
+ * otherwise produce `NaN` shards and route every event into a key no
+ * consumer reads from (silent data loss).
  */
-const SHARD_COUNT = Number(process.env.TRACKING_QUEUE_SHARDS ?? 4)
+function parseShardCount(): number {
+  const raw = process.env.TRACKING_QUEUE_SHARDS
+  if (raw == null || raw === '') return 4
+  const n = Number(raw)
+  if (!Number.isFinite(n) || n < 1) return 4
+  return Math.floor(n)
+}
+const SHARD_COUNT = parseShardCount()
 
 /** Legacy single-queue key, kept so the worker can drain leftovers from a deploy. */
 const LEGACY_QUEUE_KEY = 'tracking:jobs'
@@ -50,7 +61,11 @@ export function shardForJob(job: TrackingJob): number {
   const code =
     job.kind === 'collect' ? job.payload.trackingCode : job.payload.trackingCode
   if (!code) return 0
-  return fnv1a(code) % SHARD_COUNT
+  // Defensive: SHARD_COUNT is always >= 1 thanks to parseShardCount, but
+  // double-check so we never produce NaN (which would route to a key no
+  // consumer reads from).
+  const n = SHARD_COUNT > 0 ? SHARD_COUNT : 4
+  return fnv1a(code) % n
 }
 
 /**

@@ -15,6 +15,8 @@ import {
   serializeTrackingRequestContext,
   TrackingQueueFullError,
 } from '@ninelytics/shared/tracking-queue'
+import { updateRealtimeFromCollect } from '@ninelytics/shared/realtime-collect'
+import { getActiveWebsiteByTrackingCode } from '@ninelytics/shared/tracking-websites'
 import {
   processConversionPayload,
   type ConversionPayload,
@@ -40,6 +42,15 @@ for (const [path, type] of [
 
       const body = (await c.req.json()) as Partial<CollectPayload>
       const payload = { ...(body as CollectPayload), type }
+
+      if (!payload.trackingCode) return c.json({ error: 'Missing trackingCode' }, 400)
+      // Reject events for codes that don't resolve to an ACTIVE site.
+      // Cached negatively in Redis (~1ms) so this is essentially free.
+      const website = await getActiveWebsiteByTrackingCode(payload.trackingCode)
+      if (!website) return c.body(null, 410)
+
+      // Realtime ticker — fire-and-forget alongside the queue write.
+      void updateRealtimeFromCollect(payload, ctx)
 
       try {
         await enqueueTrackingJob({
@@ -78,6 +89,9 @@ track.post('/conversion', trackLimiter, async (c) => {
     if (!body.trackingCode || !body.visitorId || !body.sessionId) {
       return c.json({ error: 'Missing required fields' }, 400)
     }
+
+    const website = await getActiveWebsiteByTrackingCode(body.trackingCode)
+    if (!website) return c.body(null, 410)
 
     try {
       await enqueueTrackingJob({ kind: 'conversion', payload: body })

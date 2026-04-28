@@ -180,7 +180,7 @@ export const trackingRouter = router({
       return { success: true, updated: true }
     }
 
-    const session = await upsertSession(
+    await upsertSession(
       {
         websiteId,
         visitorId,
@@ -202,7 +202,7 @@ export const trackingRouter = router({
       false
     )
 
-    return { success: true, id: session?.id }
+    return { success: true, id: sessionId }
   }),
 
   pageview: publicProcedure.input(pageviewInput).mutation(async ({ input, ctx }) => {

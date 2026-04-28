@@ -16,12 +16,17 @@ import {
 } from "@ninelytics/db/schema"
 import { protectedProcedure, publicProcedure, router } from "../trpc"
 import { safeTimezone, tzDate } from "@ninelytics/shared/timezone"
-import { withQueryCache } from "@ninelytics/shared/query-cache"
+import { withQueryCache, invalidateQueryCacheByPattern } from "@ninelytics/shared/query-cache"
+import { clearTrackingWebsiteCache } from "@ninelytics/shared/tracking-websites"
+import { enqueueWorkflowJob } from "@ninelytics/shared/workflow-queue"
 
 const paginationSchema = z.object({
   page: z.number().int().min(1).optional(),
   pageSize: z.number().int().min(1).max(100).optional(),
   timezone: z.string().optional(),
+  // When true, the list also returns INACTIVE (archived / pending purge)
+  // sites so the user can see them and re-trigger a delete.
+  includeInactive: z.boolean().optional(),
 })
 
 const createWebsiteSchema = z.object({
@@ -211,14 +216,20 @@ export const websitesRouter = router({
       const pageSize = input?.pageSize && input.pageSize > 0 ? Math.min(input.pageSize, 100) : 50
       const offset = (page - 1) * pageSize
 
-      const cacheKey = `websites:optimized:${userId}:${tz}:${page}:${pageSize}`
+      const includeInactive = !!input?.includeInactive
+      const statusFilter = includeInactive
+        ? sql`w.status IN ('ACTIVE', 'INACTIVE')`
+        : sql`w.status = 'ACTIVE'`
+      const cacheKey = `websites:optimized:${userId}:${tz}:${page}:${pageSize}:${includeInactive ? 'inc' : 'act'}`
       return withQueryCache(cacheKey, 15, async () => {
 
-      // Total count of accessible websites
+      // Total count of accessible websites. Default filter is ACTIVE only;
+      // pass includeInactive to also list INACTIVE (soft-deleted / archived)
+      // sites so they can be permanently purged from the UI.
       const totalResult = await ctx.db.execute<{ total: number }>(sql`
         SELECT COUNT(*)::int as total
         FROM websites w
-        WHERE w.status != 'PENDING'
+        WHERE ${statusFilter}
           AND (
             w.owner_id = ${userId}
             OR EXISTS (
@@ -230,12 +241,22 @@ export const websitesRouter = router({
       `)
       const total = Number((totalResult as unknown as Array<{ total: number }>)[0]?.total ?? 0)
 
+      // Aggregate strategy:
+      //   • Pageview totals + the per-day chart come from the pre-aggregated
+      //     website_daily_stats table — at most 7 rows per site, primary-key
+      //     lookup. The worker flushes new counts every ~30s so this is
+      //     "near-live" without a per-request scan of page_views.
+      //   • Visitor uniqueness (visitors_today / visitors_yesterday) and
+      //     "first-pageview-at" (total_analytics_data) still query
+      //     page_views directly — DISTINCT counts can't be summed across
+      //     the daily aggregate, and MIN(timestamp) is an O(log n) index
+      //     seek anyway.
       const rows = await ctx.db.execute(sql`
         WITH accessible AS (
           SELECT w.*, u.name as owner_name, u.email as owner_email
           FROM websites w
           LEFT JOIN users u ON u.id = w.owner_id
-          WHERE w.status != 'PENDING'
+          WHERE ${statusFilter}
             AND (
               w.owner_id = ${userId}
               OR EXISTS (
@@ -246,6 +267,47 @@ export const websitesRouter = router({
             )
           ORDER BY w.created_at DESC
           LIMIT ${pageSize} OFFSET ${offset}
+        ),
+        -- Pre-aggregated daily counts for the last 7 days.
+        daily_pv AS (
+          SELECT
+            wds.website_id,
+            wds.day,
+            wds.page_views::int AS views
+          FROM website_daily_stats wds
+          WHERE wds.website_id IN (SELECT id FROM accessible)
+            AND wds.day >= ((NOW() AT TIME ZONE ${tz})::date - 6)
+        ),
+        per_site_pv_total AS (
+          SELECT website_id, SUM(views)::int AS views_last_7_days
+          FROM daily_pv
+          GROUP BY website_id
+        ),
+        per_site_last7 AS (
+          SELECT website_id, json_agg(json_build_object('date', to_char(day, 'YYYY-MM-DD'), 'views', views) ORDER BY day) AS last7days
+          FROM daily_pv
+          GROUP BY website_id
+        ),
+        -- Unique visitor counts still come from page_views since the
+        -- daily aggregate doesn't store visitor identities.
+        recent_visitors AS (
+          SELECT pv.website_id, pv.visitor_id, pv.timestamp
+          FROM page_views pv
+          WHERE pv.website_id IN (SELECT id FROM accessible)
+            AND pv.timestamp >= NOW() - INTERVAL '2 days'
+        ),
+        per_site_visitors AS (
+          SELECT
+            website_id,
+            COUNT(DISTINCT visitor_id) FILTER (
+              WHERE (timestamp AT TIME ZONE 'UTC') >= ((NOW() AT TIME ZONE ${tz})::date)::timestamp AT TIME ZONE ${tz}
+            )::int AS visitors_today,
+            COUNT(DISTINCT visitor_id) FILTER (
+              WHERE (timestamp AT TIME ZONE 'UTC') >= (((NOW() AT TIME ZONE ${tz})::date - 1)::timestamp AT TIME ZONE ${tz})
+                AND (timestamp AT TIME ZONE 'UTC') <  ((NOW() AT TIME ZONE ${tz})::date)::timestamp AT TIME ZONE ${tz}
+            )::int AS visitors_yesterday
+          FROM recent_visitors
+          GROUP BY website_id
         )
         SELECT
           w.id, w.name, w.url, w.description, w.status, w.tracking_code,
@@ -253,19 +315,19 @@ export const websitesRouter = router({
           w.cloudflare_zone_id, w.cloudflare_synced_at,
           w.google_analytics_property_id, w.google_analytics_synced_at,
           w.owner_name, w.owner_email,
-          (SELECT COUNT(*) FROM page_views pv WHERE pv.website_id = w.id AND pv.timestamp >= NOW() - INTERVAL '7 days') as views_last_7_days,
-          (SELECT COUNT(DISTINCT pv2.visitor_id) FROM page_views pv2 WHERE pv2.website_id = w.id AND (pv2.timestamp AT TIME ZONE 'UTC') >= ((NOW() AT TIME ZONE ${tz})::date)::timestamp AT TIME ZONE ${tz}) as visitors_today,
-          (SELECT COUNT(DISTINCT pv4.visitor_id) FROM page_views pv4 WHERE pv4.website_id = w.id AND (pv4.timestamp AT TIME ZONE 'UTC') >= (((NOW() AT TIME ZONE ${tz})::date - 1)::timestamp AT TIME ZONE ${tz}) AND (pv4.timestamp AT TIME ZONE 'UTC') < (((NOW() AT TIME ZONE ${tz})::date)::timestamp AT TIME ZONE ${tz})) as visitors_yesterday,
-          COALESCE(EXTRACT(DAY FROM NOW() - (SELECT MIN(pv5.timestamp) FROM page_views pv5 WHERE pv5.website_id = w.id))::int, 0) as total_analytics_data,
-          (SELECT json_agg(row_to_json(d)) FROM (
-            SELECT to_char((pv3.timestamp AT TIME ZONE 'UTC' AT TIME ZONE ${tz})::date, 'YYYY-MM-DD') as date, COUNT(*)::int as views
-            FROM page_views pv3
-            WHERE pv3.website_id = w.id
-              AND pv3.timestamp >= NOW() - INTERVAL '7 days'
-            GROUP BY 1
-            ORDER BY 1
-          ) d) as last7days
+          COALESCE(t.views_last_7_days, 0) AS views_last_7_days,
+          COALESCE(v.visitors_today, 0) AS visitors_today,
+          COALESCE(v.visitors_yesterday, 0) AS visitors_yesterday,
+          -- MIN(timestamp) on (website_id, timestamp) is an index seek →
+          -- O(log n) per site, negligible even with millions of rows.
+          COALESCE(EXTRACT(DAY FROM NOW() - (
+            SELECT MIN(pv2.timestamp) FROM page_views pv2 WHERE pv2.website_id = w.id
+          ))::int, 0) AS total_analytics_data,
+          l.last7days
         FROM accessible w
+        LEFT JOIN per_site_pv_total t ON t.website_id = w.id
+        LEFT JOIN per_site_visitors v ON v.website_id = w.id
+        LEFT JOIN per_site_last7 l ON l.website_id = w.id
         ORDER BY w.created_at DESC
       `)
 
@@ -389,6 +451,20 @@ export const websitesRouter = router({
         .where(eq(websites.id, id))
         .returning()
 
+      // Force the api+worker tracking-website caches to refetch on next
+      // event so status / excludedPaths / cookielessMode changes apply
+      // immediately instead of waiting for the 15s TTL.
+      if (updated?.trackingCode) {
+        void clearTrackingWebsiteCache(updated.trackingCode)
+      }
+      // Also drop cached /websites/ list snapshots so the dashboard
+      // reflects the change without waiting 15s. Plus public-share
+      // snapshots — a config change (excludedPaths, cookieless toggle)
+      // should be visible to viewers immediately, not after the 60s TTL.
+      void invalidateQueryCacheByPattern("websites:optimized:*")
+      void invalidateQueryCacheByPattern(`websites:stats:${id}:*`)
+      void invalidateQueryCacheByPattern("share:*")
+
       const [owner] = await ctx.db
         .select({
           id: users.id,
@@ -416,41 +492,39 @@ export const websitesRouter = router({
         throw new Error("Website not found or insufficient permissions")
       }
 
-      // Get record counts for progress tracking
-      const recordCounts = await Promise.all([
-        ctx.db.select({ count: sql<number>`count(*)` }).from(pageViews).where(eq(pageViews.websiteId, id)),
-        ctx.db.select({ count: sql<number>`count(*)` }).from(visitors).where(eq(visitors.websiteId, id)),
-        ctx.db.select({ count: sql<number>`count(*)` }).from(visitorSessions).where(eq(visitorSessions.websiteId, id)),
-        ctx.db.select({ count: sql<number>`count(*)` }).from(events).where(eq(events.websiteId, id)),
-        ctx.db.select({ count: sql<number>`count(*)` }).from(conversions).where(eq(conversions.websiteId, id)),
-        ctx.db.select({ count: sql<number>`count(*)` }).from(performanceMetrics).where(eq(performanceMetrics.websiteId, id)),
-      ])
+      // Look up the trackingCode before mutating so we can invalidate the
+      // tracking-website cache (api + worker stop accepting events for
+      // this site immediately, instead of waiting up to 15s for TTL).
+      const [siteToDelete] = await ctx.db
+        .select({ trackingCode: websites.trackingCode })
+        .from(websites)
+        .where(eq(websites.id, id))
+        .limit(1)
 
-      const totalRecords = recordCounts.reduce((sum, result) => sum + Number(result[0]?.count ?? 0), 0)
-
-      // Always soft-delete first (mark INACTIVE), then delete data in background
-      // This prevents accidental permanent deletion and lets the user recover
+      // 1. Mark INACTIVE so the site disappears from /websites/ and the
+      //    SDK gets 404 on its next config poll. (We filter ACTIVE only.)
       await ctx.db
         .update(websites)
         .set({ status: "INACTIVE" })
         .where(eq(websites.id, id))
 
-      // For small datasets, also hard-delete immediately
-      if (totalRecords <= 100000) {
-        await ctx.db.delete(websites).where(eq(websites.id, id))
-        return {
-          success: true,
-          message: "Website deleted successfully",
-          method: "direct_delete",
-          totalRecords,
-        }
+      if (siteToDelete?.trackingCode) {
+        void clearTrackingWebsiteCache(siteToDelete.trackingCode)
       }
+      void invalidateQueryCacheByPattern("websites:optimized:*")
+      void invalidateQueryCacheByPattern(`websites:stats:${id}:*`)
+      void invalidateQueryCacheByPattern(`dashboard:map:*`)
+
+      // 2. Enqueue the purge workflow. The worker batches the delete
+      //    across all child tables (page_views, events, visitors, etc) and
+      //    finally drops the websites row. Always — no size threshold —
+      //    so a "delete" really means delete, even on huge sites.
+      await enqueueWorkflowJob({ kind: "website-purge", websiteId: id })
 
       return {
         success: true,
-        message: "Website marked for deletion",
-        method: "soft_delete",
-        totalRecords,
+        message: "Website queued for deletion",
+        method: "queued_purge",
       }
     }),
 

@@ -2,6 +2,15 @@ import { z } from "zod"
 import { router, protectedProcedure } from "../trpc"
 import { funnels, funnelSteps, pageViews, events, websites, userWebsiteAccess } from "@ninelytics/db/schema"
 import { eq, and, or, sql, desc, asc } from "drizzle-orm"
+import { invalidateQueryCacheByPattern } from "@ninelytics/shared/query-cache"
+
+async function invalidateFunnelCaches(): Promise<void> {
+  await Promise.all([
+    invalidateQueryCacheByPattern("dashboard:map:*"),
+    invalidateQueryCacheByPattern("websites:optimized:*"),
+    invalidateQueryCacheByPattern("websites:stats:*"),
+  ])
+}
 
 const ensureWebsiteAccess = async (db: typeof import("@ninelytics/shared/db").db, websiteId: string, userId: string) => {
   const rows = await db
@@ -148,6 +157,8 @@ export const funnelsRouter = router({
 
       await ctx.db.insert(funnelSteps).values(stepsToInsert)
 
+      void invalidateFunnelCaches()
+
       return funnel
     }),
 
@@ -205,6 +216,8 @@ export const funnelsRouter = router({
         await ctx.db.insert(funnelSteps).values(stepsToInsert)
       }
 
+      void invalidateFunnelCaches()
+
       return { success: true }
     }),
 
@@ -215,6 +228,8 @@ export const funnelsRouter = router({
       await ensureFunnelAccess(ctx.db, input.id, userId)
 
       await ctx.db.delete(funnels).where(eq(funnels.id, input.id))
+
+      void invalidateFunnelCaches()
 
       return { success: true }
     }),

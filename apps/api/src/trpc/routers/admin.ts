@@ -1,7 +1,6 @@
 import { router, protectedProcedure } from "../trpc"
 import { QueryMonitor } from "@ninelytics/shared/query-monitor"
-import { eventQueue } from "@ninelytics/shared/event-queue"
-import { websiteStatsCache } from "@ninelytics/shared/website-stats-cache"
+import { invalidateQueryCacheByPattern } from "@ninelytics/shared/query-cache"
 import { users, organizations, organizationMembers, websites, pageViews } from "@ninelytics/db/schema"
 import { eq, sql, count } from "drizzle-orm"
 
@@ -164,23 +163,18 @@ export const adminRouter = router({
   },
 
   eventQueue: {
+    // Legacy admin endpoints — the in-memory EventQueue was never wired
+    // (no caller). Kept as no-ops so the existing admin UI doesn't break.
     status: protectedProcedure.query(async ({ ctx }) => {
       ensureSuperAdmin(ctx.session!)
-
-      const status = eventQueue.getStatus()
-      return {
-        success: true,
-        status,
-      }
+      return { success: true, status: { queueLength: 0, processing: false, events: [] } }
     }),
 
     clear: protectedProcedure.mutation(async ({ ctx }) => {
       ensureSuperAdmin(ctx.session!)
-
-      eventQueue.clearQueue()
       return {
         success: true,
-        message: "Event queue cleared",
+        message: "Event queue cleared (no-op)",
       }
     }),
   },
@@ -188,21 +182,24 @@ export const adminRouter = router({
   cache: {
     status: protectedProcedure.query(async ({ ctx }) => {
       ensureSuperAdmin(ctx.session!)
-
-      const status = websiteStatsCache.getStatus()
-      return {
-        success: true,
-        status,
-      }
+      // The old in-memory websiteStatsCache was unused. Real cache lives
+      // in Redis via withQueryCache; expose nothing here for now.
+      return { success: true, status: { backend: "redis", note: "managed via withQueryCache" } }
     }),
 
     clear: protectedProcedure.mutation(async ({ ctx }) => {
       ensureSuperAdmin(ctx.session!)
-
-      websiteStatsCache.clear()
+      // Wipe the per-user/per-website cache snapshots (websites:optimized,
+      // websites:stats, dashboard:map, share:*).
+      await Promise.all([
+        invalidateQueryCacheByPattern("websites:optimized:*"),
+        invalidateQueryCacheByPattern("websites:stats:*"),
+        invalidateQueryCacheByPattern("dashboard:map:*"),
+        invalidateQueryCacheByPattern("share:*"),
+      ])
       return {
         success: true,
-        message: "Cache cleared",
+        message: "Redis stats caches cleared",
       }
     }),
   },

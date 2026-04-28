@@ -48,3 +48,23 @@ export async function invalidateQueryCache(...keys: string[]): Promise<void> {
     console.warn('[query-cache] invalidate failed:', err)
   }
 }
+
+/**
+ * Drop every cache key matching a pattern. Uses SCAN so it's safe on a
+ * large keyspace (no KEYS / blocking the server). Use sparingly — only on
+ * mutations where an exact key list isn't known (e.g. invalidating per-
+ * user caches that vary by tz/page/pageSize).
+ */
+export async function invalidateQueryCacheByPattern(pattern: string): Promise<void> {
+  if (!isRedisConnected) return
+  try {
+    let cursor = '0'
+    do {
+      const [next, found] = await redis.scan(cursor, 'MATCH', pattern, 'COUNT', 200)
+      cursor = next
+      if (found.length > 0) await redis.del(...found)
+    } while (cursor !== '0')
+  } catch (err) {
+    console.warn('[query-cache] pattern invalidate failed:', err)
+  }
+}

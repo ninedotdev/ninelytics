@@ -38,6 +38,25 @@ else
   done
 fi
 
+# Backfill website_daily_stats for any (website, day) pairs not yet
+# captured by the worker's flusher. Idempotent: ON CONFLICT DO NOTHING
+# leaves rows alone once they've been touched. Bounded to the last 90
+# days so startup stays quick; older history can be backfilled manually
+# with the same query if a dashboard ever needs it.
+echo "[entrypoint] backfilling website_daily_stats (last 90 days)…"
+$PG -c "
+  INSERT INTO website_daily_stats (website_id, day, page_views, updated_at)
+  SELECT
+    website_id,
+    (timestamp AT TIME ZONE 'UTC')::date AS day,
+    COUNT(*)::bigint AS page_views,
+    NOW()
+  FROM page_views
+  WHERE timestamp >= NOW() - INTERVAL '90 days'
+  GROUP BY website_id, (timestamp AT TIME ZONE 'UTC')::date
+  ON CONFLICT (website_id, day) DO NOTHING;
+" >/dev/null 2>&1 || echo "[entrypoint] backfill skipped (table not ready yet)"
+
 echo "[entrypoint] starting api…"
 cd /app/apps/api
 exec bun run src/index.ts

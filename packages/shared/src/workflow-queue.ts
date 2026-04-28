@@ -14,6 +14,7 @@ const WORKFLOW_QUEUE_KEY = 'jobs:workflow'
 export type WorkflowJob =
   | { kind: 'uptime-check'; websiteId: string }
   | { kind: 'sitemap-poll'; websiteId: string }
+  | { kind: 'website-purge'; websiteId: string }
 
 export async function enqueueWorkflowJob(job: WorkflowJob): Promise<void> {
   await redis.lpush(WORKFLOW_QUEUE_KEY, JSON.stringify(job))

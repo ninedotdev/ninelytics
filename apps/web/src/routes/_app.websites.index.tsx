@@ -83,6 +83,7 @@ function WebsitesPage() {
   const navigate = useNavigate();
   const [websites, setWebsites] = useState<Website[]>([]);
   const [page, setPage] = useState(1);
+  const [showArchived, setShowArchived] = useState(false);
   const pageSize = 12;
   const [total, setTotal] = useState(0);
   const [deletingWebsiteId, setDeletingWebsiteId] = useState<string | null>(null);
@@ -97,9 +98,13 @@ function WebsitesPage() {
     localStorage.setItem("websites_view", mode);
   };
   const timezone = useTimezone().timezone;
+  // Note: no `placeholderData` so the UI doesn't keep stale rows while
+  // refetching — when counts change the user sees the spinner briefly,
+  // not the old number. staleTime aligned with the 15s Redis TTL on the
+  // server cache, so refetches are cheap (cache hit) within the window.
   const { data, isLoading, refetch, isFetching } = trpc.websites.optimized.useQuery(
-    { page, pageSize, timezone },
-    { placeholderData: (previousData) => previousData, staleTime: 30_000, refetchOnWindowFocus: true }
+    { page, pageSize, timezone, includeInactive: showArchived },
+    { staleTime: 15_000, refetchOnWindowFocus: true, refetchOnMount: true }
   );
 
   useEffect(() => {
@@ -245,19 +250,32 @@ function WebsitesPage() {
               Add Website
             </Link>
           </Button>
-          <div className="flex items-center rounded-lg border bg-muted p-0.5">
+          <div className="flex items-center gap-2">
             <button
-              onClick={() => toggleView("grid")}
-              className={`p-1.5 rounded-md transition-colors ${viewMode === "grid" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+              onClick={() => { setShowArchived((v) => !v); setPage(1) }}
+              className={`text-xs px-2.5 py-1.5 rounded-md border transition-colors ${
+                showArchived
+                  ? "bg-amber-500/10 border-amber-500/30 text-amber-600 dark:text-amber-400"
+                  : "bg-background hover:bg-muted text-muted-foreground"
+              }`}
+              title="Show archived (soft-deleted) websites"
             >
-              <IconLayoutGrid size={16} />
+              {showArchived ? "Hiding archived" : "Show archived"}
             </button>
-            <button
-              onClick={() => toggleView("list")}
-              className={`p-1.5 rounded-md transition-colors ${viewMode === "list" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
-            >
-              <IconList size={16} />
-            </button>
+            <div className="flex items-center rounded-lg border bg-muted p-0.5">
+              <button
+                onClick={() => toggleView("grid")}
+                className={`p-1.5 rounded-md transition-colors ${viewMode === "grid" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+              >
+                <IconLayoutGrid size={16} />
+              </button>
+              <button
+                onClick={() => toggleView("list")}
+                className={`p-1.5 rounded-md transition-colors ${viewMode === "list" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+              >
+                <IconList size={16} />
+              </button>
+            </div>
           </div>
         </div>
 
