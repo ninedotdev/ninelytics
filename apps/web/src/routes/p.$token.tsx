@@ -51,7 +51,7 @@ interface ShareDashboard {
   os: Array<{ os: string; count: number }>
   topReferrers: Array<{ referrer: string; count: number }>
   trafficSources: Array<{ source: string; count: number }>
-  chart: Array<{ day: string; views: number; visitors: number }>
+  chart: Array<{ date: string; views: number; visitors: number }>
 }
 
 const PERIOD_OPTIONS = [

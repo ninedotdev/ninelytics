@@ -257,69 +257,77 @@
     let searchEngine = null;
     let socialNetwork = null;
 
-    if (utmSource) {
-      source = utmSource;
-      medium = utmMedium;
-    } else if (refParam) {
-      source = refParam;
-      medium = 'referral';
-    } else if (referrer) {
+    // Always derive the referring host first when a referrer header was
+    // sent. Doing this independently of UTM presence means a visit that
+    // arrived with both `?utm_source=...` AND a real referrer still
+    // populates referrer_domain — otherwise those rows vanish from the
+    // Top Referrers breakdown even though they came from a real site.
+    if (referrer) {
       try {
-        const refUrl = new URL(referrer);
-        referrerDomain = refUrl.hostname.replace('www.', '');
+        const refHost = new URL(referrer).hostname.replace(/^www\./, '').toLowerCase();
+        if (refHost) referrerDomain = refHost;
+      } catch (e) {
+        // Invalid referrer URL — leave referrerDomain null
+      }
+    }
 
-        // Check if search engine
-        const searchEngines = {
-          'google': 'Google',
-          'bing': 'Bing',
-          'yahoo': 'Yahoo',
-          'duckduckgo': 'DuckDuckGo',
-          'baidu': 'Baidu',
-          'yandex': 'Yandex',
-        };
+    const searchEngines = {
+      'google': 'Google',
+      'bing': 'Bing',
+      'yahoo': 'Yahoo',
+      'duckduckgo': 'DuckDuckGo',
+      'baidu': 'Baidu',
+      'yandex': 'Yandex',
+    };
+    const socialNetworks = {
+      'facebook.com': 'Facebook',
+      'twitter.com': 'Twitter',
+      'x.com': 'X (Twitter)',
+      'linkedin.com': 'LinkedIn',
+      'instagram.com': 'Instagram',
+      'pinterest.com': 'Pinterest',
+      'reddit.com': 'Reddit',
+      'tiktok.com': 'TikTok',
+      'youtube.com': 'YouTube',
+    };
 
-        for (const [key, name] of Object.entries(searchEngines)) {
-          if (referrerDomain.includes(key)) {
-            source = 'organic';
-            medium = 'search';
-            isSearchEngine = true;
-            searchEngine = name;
+    if (referrerDomain) {
+      for (const [key, name] of Object.entries(searchEngines)) {
+        if (referrerDomain.includes(key)) {
+          isSearchEngine = true;
+          searchEngine = name;
+          break;
+        }
+      }
+      if (!isSearchEngine) {
+        for (const [domain, name] of Object.entries(socialNetworks)) {
+          if (referrerDomain.includes(domain)) {
+            socialNetwork = name;
             break;
           }
         }
-
-        // Check if social network
-        if (!isSearchEngine) {
-          const socialNetworks = {
-            'facebook.com': 'Facebook',
-            'twitter.com': 'Twitter',
-            'x.com': 'X (Twitter)',
-            'linkedin.com': 'LinkedIn',
-            'instagram.com': 'Instagram',
-            'pinterest.com': 'Pinterest',
-            'reddit.com': 'Reddit',
-            'tiktok.com': 'TikTok',
-            'youtube.com': 'YouTube',
-          };
-
-          for (const [domain, name] of Object.entries(socialNetworks)) {
-            if (referrerDomain.includes(domain)) {
-              source = 'social';
-              medium = name.toLowerCase();
-              socialNetwork = name;
-              break;
-            }
-          }
-        }
-
-        // If not search or social, it's referral
-        if (!isSearchEngine && !socialNetwork) {
-          source = 'referral';
-          medium = 'referral';
-        }
-      } catch (e) {
-        // Invalid referrer URL
       }
+    }
+
+    // Source priority: UTM tag > ref/source query param > referrer-derived.
+    // Whatever wins gets normalized to lowercase so the Traffic Sources
+    // breakdown groups e.g. "Chatgpt.com" and "chatgpt.com" together.
+    const normalize = (v) => (typeof v === 'string' ? v.trim().toLowerCase() : null);
+    if (utmSource) {
+      source = normalize(utmSource) || 'direct';
+      medium = normalize(utmMedium);
+    } else if (refParam) {
+      source = normalize(refParam) || 'direct';
+      medium = 'referral';
+    } else if (isSearchEngine) {
+      source = 'organic';
+      medium = 'search';
+    } else if (socialNetwork) {
+      source = 'social';
+      medium = socialNetwork.toLowerCase();
+    } else if (referrerDomain) {
+      source = 'referral';
+      medium = 'referral';
     }
 
     return {

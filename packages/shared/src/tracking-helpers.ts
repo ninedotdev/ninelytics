@@ -122,11 +122,45 @@ export async function upsertVisitor(
   }
 }
 
+/**
+ * Lowercase + trim a referring host / UTM source / source value so the
+ * Top Referrers and Traffic Sources breakdowns group case-insensitive
+ * variants together (e.g. "Chatgpt.com" and "chatgpt.com" become one).
+ */
+function normalizeRef(value: string | null | undefined): string | null {
+  if (typeof value !== "string") return null
+  const v = value.trim().toLowerCase()
+  return v.length > 0 ? v : null
+}
+
+/**
+ * Best-effort hostname extraction from a raw referrer URL. Used as a
+ * fallback when the SDK didn't set referrerDomain (older script
+ * versions, or events that arrived via /api/track/* without parsing).
+ */
+function deriveReferrerDomain(referrer: string | null | undefined): string | null {
+  if (!referrer) return null
+  try {
+    return new URL(referrer).hostname.replace(/^www\./, "").toLowerCase() || null
+  } catch {
+    return null
+  }
+}
+
 export async function upsertSession(
   data: SessionData,
   incrementPageViews = false
 ) {
   const nowIso = toIso(new Date())
+
+  // Defensive normalization at write time — older SDK versions cached in
+  // the wild (5min cache header) might still send raw / mixed-case
+  // values. New SDK normalizes client-side too; together they make the
+  // grouping correct regardless of which path produced the event.
+  const normalizedReferrerDomain =
+    normalizeRef(data.referrerDomain) ?? deriveReferrerDomain(data.referrer)
+  const normalizedUtmSource = normalizeRef(data.utmSource)
+  const normalizedSource = normalizeRef(data.source)
 
   // Sessions are write-once for tracking purposes: the first event creates
   // the row with full UTM / source / referrer / landing data, and that
@@ -148,14 +182,14 @@ export async function upsertSession(
         sessionId: data.sessionId,
         referrer: data.referrer ?? null,
         landingPage: data.landingPage ?? null,
-        utmSource: data.utmSource ?? null,
-        utmMedium: data.utmMedium ?? null,
+        utmSource: normalizedUtmSource,
+        utmMedium: normalizeRef(data.utmMedium),
         utmCampaign: data.utmCampaign ?? null,
         utmTerm: data.utmTerm ?? null,
         utmContent: data.utmContent ?? null,
-        source: data.source ?? null,
-        medium: data.medium ?? null,
-        referrerDomain: data.referrerDomain ?? null,
+        source: normalizedSource,
+        medium: normalizeRef(data.medium),
+        referrerDomain: normalizedReferrerDomain,
         isSearchEngine: data.isSearchEngine ?? null,
         searchEngine: data.searchEngine ?? null,
         socialNetwork: data.socialNetwork ?? null,

@@ -224,7 +224,7 @@ publicShare.get('/:token', async (c) => {
         .limit(8),
       db
         .select({
-          day: sql<string>`${sql.raw(tzDate('"page_views"."timestamp"', tz))}::text`,
+          date: sql<string>`${sql.raw(tzDate('"page_views"."timestamp"', tz))}::text`,
           views: sql<number>`count(*)`,
           visitors: sql<number>`count(DISTINCT ${pageViews.visitorId})`,
         })
@@ -274,7 +274,7 @@ publicShare.get('/:token', async (c) => {
         source: s.source ?? 'direct',
         count: Number(s.count),
       })),
-      chart: chartRaw.map((r) => ({ day: r.day, views: Number(r.views), visitors: Number(r.visitors) })),
+      chart: chartRaw.map((r) => ({ date: r.date, views: Number(r.views), visitors: Number(r.visitors) })),
     }
   })
 
